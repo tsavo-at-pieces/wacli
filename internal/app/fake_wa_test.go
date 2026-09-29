@@ -87,6 +87,8 @@ type fakeWA struct {
 
 	presenceCalls   []types.Presence
 	sendPresenceErr error
+
+	statusChannels fakeStatusChannelsState
 }
 
 type fakeArchiveCall struct {

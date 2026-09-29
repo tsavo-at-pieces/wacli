@@ -78,16 +78,28 @@ func (d *DB) UpsertStatusMessage(p UpsertStatusMessageParams) error {
 	return err
 }
 
-func (d *DB) GetStatusMessage(msgID string) (StatusMessage, error) {
-	row := d.sql.QueryRow(`
-		SELECT rowid, msg_id, ts, from_me,
+const statusMessageColumns = `rowid, msg_id, ts, from_me,
 			COALESCE(sender_jid,''), COALESCE(sender_name,''), COALESCE(text,''),
 			COALESCE(media_type,''), COALESCE(media_caption,''), COALESCE(filename,''),
 			COALESCE(mime_type,''), COALESCE(direct_path,''), media_key, file_sha256,
-			file_enc_sha256, COALESCE(file_length,0), COALESCE(background_color,''), COALESCE(font,0)
+			file_enc_sha256, COALESCE(file_length,0), COALESCE(background_color,''), COALESCE(font,0)`
+
+func (d *DB) GetStatusMessage(msgID string) (StatusMessage, error) {
+	row := d.sql.QueryRow(`SELECT `+statusMessageColumns+`
 		FROM status_messages
 		WHERE msg_id = ?
 	`, strings.TrimSpace(msgID))
+	out, err := scanStatusMessage(row)
+	if err != nil {
+		if err == sql.ErrNoRows {
+			return StatusMessage{}, sql.ErrNoRows
+		}
+		return StatusMessage{}, err
+	}
+	return out, nil
+}
+
+func scanStatusMessage(row interface{ Scan(dest ...any) error }) (StatusMessage, error) {
 	var out StatusMessage
 	var ts int64
 	var fromMe int
@@ -96,9 +108,6 @@ func (d *DB) GetStatusMessage(msgID string) (StatusMessage, error) {
 	if err := row.Scan(&out.RowID, &out.MsgID, &ts, &fromMe, &out.SenderJID, &out.SenderName, &out.Text,
 		&out.MediaType, &out.MediaCaption, &out.Filename, &out.MimeType, &out.DirectPath,
 		&out.MediaKey, &out.FileSHA256, &out.FileEncSHA256, &fileLength, &out.BackgroundColor, &font); err != nil {
-		if err == sql.ErrNoRows {
-			return StatusMessage{}, sql.ErrNoRows
-		}
 		return StatusMessage{}, err
 	}
 	out.Timestamp = time.Unix(ts, 0).UTC()
@@ -106,4 +115,49 @@ func (d *DB) GetStatusMessage(msgID string) (StatusMessage, error) {
 	out.Font = int32(font)
 	out.FileLength = uint64(fileLength)
 	return out, nil
+}
+
+type ListStatusMessagesParams struct {
+	// SenderJIDs limits results to these senders (any identity of one person).
+	SenderJIDs []string
+	After      *time.Time
+	Before     *time.Time
+	Limit      int
+}
+
+// ListStatusMessages returns stored status broadcasts, newest first.
+func (d *DB) ListStatusMessages(p ListStatusMessagesParams) ([]StatusMessage, error) {
+	if p.Limit <= 0 {
+		p.Limit = 50
+	}
+	query := `SELECT ` + statusMessageColumns + `
+		FROM status_messages
+		WHERE 1=1`
+	var args []any
+	query, args = appendStringFilter(query, args, "sender_jid", "", p.SenderJIDs)
+	if p.After != nil {
+		query += " AND ts > ?"
+		args = append(args, unix(*p.After))
+	}
+	if p.Before != nil {
+		query += " AND ts < ?"
+		args = append(args, unix(*p.Before))
+	}
+	query += " ORDER BY ts DESC, rowid DESC LIMIT ?"
+	args = append(args, p.Limit)
+
+	rows, err := d.sql.Query(query, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []StatusMessage
+	for rows.Next() {
+		s, err := scanStatusMessage(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, s)
+	}
+	return out, rows.Err()
 }

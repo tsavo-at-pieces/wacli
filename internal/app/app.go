@@ -111,6 +111,10 @@ type WAClient interface {
 	SetStatusMessage(ctx context.Context, msg string) error
 	SetProfileName(ctx context.Context, name string) error
 	GetBusinessProfile(ctx context.Context, jid types.JID) (*types.BusinessProfile, error)
+
+	// Status, channel and call management.
+	MuteUserStatus(ctx context.Context, target types.JID, mute bool, beforeApply func()) ([]any, error)
+	GetStatusPrivacy(ctx context.Context) ([]types.StatusPrivacy, error)
 }
 
 type Options struct {
