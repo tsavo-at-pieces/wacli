@@ -46,7 +46,7 @@ type WAClient interface {
 	GetGroupInfo(ctx context.Context, jid types.JID) (*types.GroupInfo, error)
 	CreateGroup(ctx context.Context, req wa.CreateGroupRequest) (*types.GroupInfo, error)
 	SetGroupName(ctx context.Context, jid types.JID, name string) error
-	SetGroupTopic(ctx context.Context, jid types.JID, topic string) error
+	SetGroupTopic(ctx context.Context, jid types.JID, previousID, topic string) error
 	SetGroupAnnounce(ctx context.Context, jid types.JID, announce bool) error
 	SetGroupLocked(ctx context.Context, jid types.JID, locked bool) error
 	UpdateGroupParticipants(ctx context.Context, group types.JID, users []types.JID, action wa.GroupParticipantAction) ([]types.GroupParticipant, error)

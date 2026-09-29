@@ -5,10 +5,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 
-	"github.com/openclaw/wacli/internal/app"
+	"github.com/openclaw/wacli/internal/lock"
 	"github.com/openclaw/wacli/internal/out"
 	"github.com/openclaw/wacli/internal/store"
 	"github.com/spf13/cobra"
@@ -30,7 +31,11 @@ groups older than the threshold. Add --include-active to also prune active
 groups whose last local message is older than the threshold.
 
 This only deletes local wacli store rows. It does not leave WhatsApp groups
-or delete anything from WhatsApp servers. Use --dry-run to preview targets.`,
+or delete anything from WhatsApp servers. Use --dry-run to preview targets.
+
+While "sync --follow" runs, --dry-run reads the store without its lock and
+the deletion itself runs in the sync process, limited to the groups listed
+for confirmation that are still prunable.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			if err := flags.requireWritable(); err != nil {
 				return err
@@ -45,13 +50,32 @@ or delete anything from WhatsApp servers. Use --dry-run to preview targets.`,
 			ctx, cancel := withTimeout(context.Background(), flags)
 			defer cancel()
 
+			if dryRun {
+				groups, err := listPrunableGroupsUnlocked(ctx, flags, days, includeActive)
+				if err != nil {
+					return err
+				}
+				return writePruneDryRun(groups, flags.asJSON)
+			}
+
 			a, lk, err := newApp(ctx, flags, true, false)
 			if err != nil {
-				return err
+				return delegateGroupsPrune(ctx, flags, err, days, includeActive, confirm)
 			}
 			defer closeApp(a, lk)
 
-			return pruneGroups(a, days, includeActive, dryRun, confirm, flags.asJSON)
+			groups, err := a.DB().ListPrunableGroups(days, includeActive)
+			if err != nil {
+				return err
+			}
+			if len(groups) == 0 {
+				return writeNothingToPrune(flags.asJSON)
+			}
+			if !confirm && !confirmGroupsPrune(os.Stdin, len(groups)) {
+				return nil
+			}
+			deleted, err := deleteGroupsLocally(a.DB(), groups)
+			return writeGroupsPruned(flags.asJSON, deleted, err)
 		},
 	}
 	cmd.Flags().IntVar(&days, "days", 0, "prune groups older than N days (0 = all left groups)")
@@ -62,50 +86,156 @@ or delete anything from WhatsApp servers. Use --dry-run to preview targets.`,
 	return cmd
 }
 
-func pruneGroups(a *app.App, days int, includeActive, dryRun, confirm, asJSON bool) error {
-	groups, err := a.DB().ListPrunableGroups(days, includeActive)
+// listPrunableGroupsUnlocked reads the prune targets without the store lock,
+// as `groups list` does, so it works while `sync --follow` holds the lock.
+func listPrunableGroupsUnlocked(ctx context.Context, flags *rootFlags, days int, includeActive bool) ([]store.Group, error) {
+	a, lk, err := newApp(ctx, flags, false, false)
+	if err != nil {
+		return nil, err
+	}
+	defer closeApp(a, lk)
+	return a.DB().ListPrunableGroups(days, includeActive)
+}
+
+// delegateGroupsPrune runs a prune in the same-store `sync --follow` that
+// holds the lock. The caller confirms the targets here, and the sync process
+// deletes only those that are still prunable when it runs. Without a running
+// sync process it returns lockErr.
+func delegateGroupsPrune(ctx context.Context, flags *rootFlags, lockErr error, days int, includeActive, confirm bool) error {
+	if !lock.IsLocked(lockErr) || !sendDelegateSocketPresent(flags) {
+		return lockErr
+	}
+	groups, err := listPrunableGroupsUnlocked(ctx, flags, days, includeActive)
 	if err != nil {
 		return err
 	}
-
 	if len(groups) == 0 {
-		if asJSON {
-			return out.WriteJSON(os.Stdout, map[string]any{"deleted": 0, "message": "no groups to prune"})
-		}
-		fmt.Fprintln(os.Stderr, "No groups to prune.")
+		return writeNothingToPrune(flags.asJSON)
+	}
+	if !confirm && !confirmGroupsPrune(os.Stdin, len(groups)) {
 		return nil
 	}
-
-	if dryRun {
-		if asJSON {
-			return out.WriteJSON(os.Stdout, map[string]any{"would_delete": len(groups), "groups": groups})
-		}
-		writePruneTargets(os.Stderr, "Would delete", groups)
-		fmt.Fprintln(os.Stderr, "\nRun without --dry-run to actually delete.")
-		return nil
+	jids := make([]string, 0, len(groups))
+	for _, g := range groups {
+		jids = append(jids, g.JID)
 	}
+	req := sendDelegateRequest{Kind: groupsPruneKind, Groups: jids, PruneDays: days, IncludeActive: includeActive}
+	return delegateAfterOpenFailure(ctx, flags, lockErr, req, func(resp sendDelegateResponse) error {
+		var deleted []prunedGroup
+		if err := decodeGroupResult(resp.Result, &deleted); err != nil {
+			return err
+		}
+		return writeGroupsPruned(flags.asJSON, deleted, nil)
+	})
+}
 
-	if !confirm {
-		fmt.Fprintf(os.Stderr, "About to delete %d group(s) from the local wacli store. This cannot be undone.\n", len(groups))
-		fmt.Fprint(os.Stderr, "Continue? [y/N] ")
-		reader := bufio.NewReader(os.Stdin)
-		answer, _ := reader.ReadString('\n')
-		answer = strings.TrimSpace(strings.ToLower(answer))
-		if answer != "y" && answer != "yes" {
-			fmt.Fprintln(os.Stderr, "Aborted.")
-			return nil
+// sendDelegateSocketPresent reports whether a sync process has opened the
+// store's delegate socket, before asking the user to confirm work only it
+// could do.
+func sendDelegateSocketPresent(flags *rootFlags) bool {
+	storeDir, err := resolveStoreDir(flags)
+	if err != nil {
+		return false
+	}
+	info, err := os.Lstat(sendDelegateSocketPath(storeDir))
+	return err == nil && info.Mode()&os.ModeSocket != 0
+}
+
+// prunedGroup is a group whose local rows were deleted.
+type prunedGroup struct {
+	JID  string `json:"jid"`
+	Name string `json:"name,omitempty"`
+}
+
+// executeGroupsPrune deletes the local rows of the groups the caller
+// confirmed (req.Groups) that are still prunable under the same criteria.
+func executeGroupsPrune(_ context.Context, a waStoreApp, req sendDelegateRequest) (sendDelegateResponse, error) {
+	if req.PruneDays < 0 {
+		return sendDelegateResponse{}, fmt.Errorf("days must not be negative")
+	}
+	if len(req.Groups) == 0 {
+		return sendDelegateResponse{}, fmt.Errorf("no confirmed groups to prune")
+	}
+	confirmed := make(map[string]bool, len(req.Groups))
+	for _, jid := range req.Groups {
+		confirmed[jid] = true
+	}
+	current, err := a.DB().ListPrunableGroups(req.PruneDays, req.IncludeActive)
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	var targets []store.Group
+	for _, g := range current {
+		if confirmed[g.JID] {
+			targets = append(targets, g)
 		}
 	}
+	deleted, err := deleteGroupsLocally(a.DB(), targets)
+	if err != nil {
+		return sendDelegateResponse{}, fmt.Errorf("prune incomplete: deleted %d group(s): %w", len(deleted), err)
+	}
+	if deleted == nil {
+		deleted = []prunedGroup{}
+	}
+	raw, err := encodeGroupResult(deleted)
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	return sendDelegateResponse{OK: true, Count: len(deleted), Result: raw}, nil
+}
 
-	var deleted int
+// deleteGroupsLocally deletes each group's local rows and returns the ones it
+// deleted, with every failure joined into err.
+func deleteGroupsLocally(db *store.DB, groups []store.Group) ([]prunedGroup, error) {
+	var deleted []prunedGroup
 	var failures []error
 	for _, g := range groups {
-		if err := a.DB().DeleteGroupLocalData(g.JID); err != nil {
+		if err := db.DeleteGroupLocalData(g.JID); err != nil {
 			failures = append(failures, fmt.Errorf("delete group %s: %w", g.JID, err))
 			continue
 		}
-		deleted++
-		if !asJSON {
+		deleted = append(deleted, prunedGroup{JID: g.JID, Name: g.Name})
+	}
+	return deleted, errors.Join(failures...)
+}
+
+func confirmGroupsPrune(in io.Reader, n int) bool {
+	fmt.Fprintf(os.Stderr, "About to delete %d group(s) from the local wacli store. This cannot be undone.\n", n)
+	fmt.Fprint(os.Stderr, "Continue? [y/N] ")
+	answer, _ := bufio.NewReader(in).ReadString('\n')
+	answer = strings.TrimSpace(strings.ToLower(answer))
+	if answer != "y" && answer != "yes" {
+		fmt.Fprintln(os.Stderr, "Aborted.")
+		return false
+	}
+	return true
+}
+
+func writeNothingToPrune(asJSON bool) error {
+	if asJSON {
+		return out.WriteJSON(os.Stdout, map[string]any{"deleted": 0, "message": "no groups to prune"})
+	}
+	fmt.Fprintln(os.Stderr, "No groups to prune.")
+	return nil
+}
+
+func writePruneDryRun(groups []store.Group, asJSON bool) error {
+	if len(groups) == 0 {
+		return writeNothingToPrune(asJSON)
+	}
+	if asJSON {
+		return out.WriteJSON(os.Stdout, map[string]any{"would_delete": len(groups), "groups": groups})
+	}
+	writePruneTargets(os.Stderr, "Would delete", groups)
+	fmt.Fprintln(os.Stderr, "\nRun without --dry-run to actually delete.")
+	return nil
+}
+
+// writeGroupsPruned reports the deleted groups. With deleteErr set, it lists
+// what was deleted and returns the failure.
+func writeGroupsPruned(asJSON bool, deleted []prunedGroup, deleteErr error) error {
+	if !asJSON {
+		for _, g := range deleted {
 			name := g.Name
 			if name == "" {
 				name = g.JID
@@ -113,15 +243,13 @@ func pruneGroups(a *app.App, days int, includeActive, dryRun, confirm, asJSON bo
 			fmt.Fprintf(os.Stderr, "Deleted %s\n", sanitize(name))
 		}
 	}
-
-	if err := errors.Join(failures...); err != nil {
-		return fmt.Errorf("prune incomplete: deleted %d group(s): %w", deleted, err)
+	if deleteErr != nil {
+		return fmt.Errorf("prune incomplete: deleted %d group(s): %w", len(deleted), deleteErr)
 	}
-
 	if asJSON {
-		return out.WriteJSON(os.Stdout, map[string]any{"deleted": deleted})
+		return out.WriteJSON(os.Stdout, map[string]any{"deleted": len(deleted)})
 	}
-	fmt.Fprintf(os.Stderr, "\nDone. Deleted %d group(s).\n", deleted)
+	fmt.Fprintf(os.Stderr, "\nDone. Deleted %d group(s).\n", len(deleted))
 	return nil
 }
 

@@ -81,6 +81,12 @@ type sendDelegateRequest struct {
 	PostSendWaitMS       int64    `json:"post_send_wait_ms,omitempty"`
 	TimeoutMS            int64    `json:"timeout_ms,omitempty"`
 	DeadlineUnixMS       int64    `json:"deadline_unix_ms,omitempty"`
+	// Group commands (send_ipc_groups.go).
+	Topic         string   `json:"topic,omitempty"`
+	Enabled       bool     `json:"enabled,omitempty"`
+	Groups        []string `json:"groups,omitempty"`
+	PruneDays     int      `json:"prune_days,omitempty"`
+	IncludeActive bool     `json:"include_active,omitempty"`
 }
 
 type sendDelegateResponse struct {
@@ -109,6 +115,9 @@ type sendDelegateResponse struct {
 	Link         string          `json:"link,omitempty"`
 	Count        int             `json:"count,omitempty"`
 	DeletedMedia bool            `json:"deleted_media,omitempty"`
+	// Result carries a group command's own result, encoded as its direct run
+	// prints it with --json (send_ipc_groups.go).
+	Result json.RawMessage `json:"result,omitempty"`
 }
 
 type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)

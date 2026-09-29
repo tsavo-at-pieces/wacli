@@ -66,14 +66,18 @@ func (c *Client) SetGroupName(ctx context.Context, jid types.JID, name string) e
 	return cli.SetGroupName(ctx, jid, name)
 }
 
-func (c *Client) SetGroupTopic(ctx context.Context, jid types.JID, topic string) error {
+// SetGroupTopic replaces the group description. previousID must name the
+// description being replaced (GroupInfo.TopicID); WhatsApp rejects a change
+// whose "prev" is not the current one. An empty previousID makes whatsmeow
+// look it up with one more group-info query. The new ID is generated.
+func (c *Client) SetGroupTopic(ctx context.Context, jid types.JID, previousID, topic string) error {
 	c.mu.Lock()
 	cli := c.client
 	c.mu.Unlock()
 	if cli == nil || !cli.IsConnected() {
 		return fmt.Errorf("not connected")
 	}
-	return cli.SetGroupTopic(ctx, jid, "", "", topic)
+	return cli.SetGroupTopic(ctx, jid, previousID, "", topic)
 }
 
 func (c *Client) SetGroupAnnounce(ctx context.Context, jid types.JID, announce bool) error {

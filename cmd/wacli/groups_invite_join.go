@@ -39,38 +39,34 @@ func newGroupsInviteLinkGetCmd(flags *rootFlags) *cobra.Command {
 			if strings.TrimSpace(jidStr) == "" {
 				return fmt.Errorf("--jid is required")
 			}
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
+			if err := requireLiveRead(flags); err != nil {
 				return err
 			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-			gjid, err := types.ParseJID(jidStr)
-			if err != nil {
-				return err
-			}
-			link, err := a.WA().GetGroupInviteLink(ctx, gjid, false)
-			if err != nil {
-				return err
-			}
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"jid": gjid.String(), "link": link})
-			}
-			fmt.Fprintln(os.Stdout, link)
-			return nil
+			return runLiveGroupCommand(flags, sendDelegateRequest{Kind: groupInviteLinkGetKind, To: jidStr}, func(resp sendDelegateResponse) error {
+				if flags.asJSON {
+					return out.WriteJSON(os.Stdout, map[string]any{"jid": resp.Chat, "link": resp.Link})
+				}
+				fmt.Fprintln(os.Stdout, resp.Link)
+				return nil
+			})
 		},
 	}
 	cmd.Flags().StringVar(&jidStr, "jid", "", "group JID (…@g.us)")
 	return cmd
+}
+
+// executeGroupInviteLinkGet returns the current invite link without
+// resetting it.
+func executeGroupInviteLinkGet(ctx context.Context, a waStoreApp, req sendDelegateRequest) (sendDelegateResponse, error) {
+	gjid, err := types.ParseJID(req.To)
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	link, err := a.WA().GetGroupInviteLink(ctx, gjid, false)
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	return sendDelegateResponse{OK: true, Chat: gjid.String(), Link: link}, nil
 }
 
 func newGroupsInviteLinkRevokeCmd(flags *rootFlags) *cobra.Command {

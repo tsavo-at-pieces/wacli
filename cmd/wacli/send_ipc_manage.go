@@ -84,6 +84,9 @@ func executeDelegatedManagement(ctx context.Context, a delegatedManagementApp, r
 	case messageForwardKind:
 		return executeDelegatedMessageForward(ctx, a, req)
 	default:
+		if resp, ok, err := executeDelegatedGroupKind(ctx, a, req); ok {
+			return resp, err
+		}
 		return sendDelegateResponse{}, fmt.Errorf("unsupported send kind %q", req.Kind)
 	}
 }

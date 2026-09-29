@@ -393,7 +393,7 @@ func (f *fakeWA) SetGroupName(ctx context.Context, jid types.JID, name string) e
 	return nil
 }
 
-func (f *fakeWA) SetGroupTopic(ctx context.Context, jid types.JID, topic string) error {
+func (f *fakeWA) SetGroupTopic(ctx context.Context, jid types.JID, previousID, topic string) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	g := f.groups[jid]
