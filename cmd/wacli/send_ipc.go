@@ -78,6 +78,15 @@ type sendDelegateRequest struct {
 	Alias                string   `json:"alias,omitempty"`
 	Tag                  string   `json:"tag,omitempty"`
 	DeleteMedia          bool     `json:"delete_media,omitempty"`
+	DeleteStarred        bool     `json:"delete_starred,omitempty"`
+	Duration             string   `json:"duration,omitempty"`
+	List                 string   `json:"list,omitempty"`
+	Contacts             []string `json:"contacts,omitempty"`
+	Description          string   `json:"description,omitempty"`
+	StartUnix            int64    `json:"start_unix,omitempty"`
+	EndUnix              int64    `json:"end_unix,omitempty"`
+	Location             string   `json:"location,omitempty"`
+	JoinLink             string   `json:"join_link,omitempty"`
 	PostSendWaitMS       int64    `json:"post_send_wait_ms,omitempty"`
 	TimeoutMS            int64    `json:"timeout_ms,omitempty"`
 	DeadlineUnixMS       int64    `json:"deadline_unix_ms,omitempty"`
@@ -149,7 +158,9 @@ type sendDelegateResponse struct {
 	// as the direct command would print it with --json.
 	Payload json.RawMessage `json:"payload,omitempty"`
 	// Event marks a progress frame a job streams before its final response.
-	Event *delegateJobEvent `json:"event,omitempty"`
+	Event    *delegateJobEvent `json:"event,omitempty"`
+	Duration string            `json:"duration,omitempty"`
+	ListID   string            `json:"list_id,omitempty"`
 }
 
 type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)
@@ -369,7 +380,7 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 	switch req.Kind {
 	case "text":
 		return executeDelegatedText(ctx, a, req)
-	case "file", "voice":
+	case "file", "voice", fileViewOnceKind, voiceViewOnceKind:
 		return executeDelegatedFile(ctx, a, req)
 	case "sticker":
 		return executeDelegatedSticker(ctx, a, req)
@@ -527,7 +538,9 @@ func executeDelegatedText(ctx context.Context, a *app.App, req sendDelegateReque
 }
 
 func executeDelegatedFile(ctx context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
-	mediaAs, err := validateSendFileMediaOptions(req.As, req.PTT || req.Kind == "voice")
+	ptt := req.PTT || req.Kind == "voice" || req.Kind == voiceViewOnceKind
+	viewOnce := req.Kind == fileViewOnceKind || req.Kind == voiceViewOnceKind
+	mediaAs, err := validateSendFileMediaOptions(req.As, ptt)
 	if err != nil {
 		return sendDelegateResponse{}, err
 	}
@@ -547,7 +560,8 @@ func executeDelegatedFile(ctx context.Context, a *app.App, req sendDelegateReque
 			mediaAs:       mediaAs,
 			replyTo:       req.ReplyTo,
 			replyToSender: req.ReplyToSender,
-			ptt:           req.PTT || req.Kind == "voice",
+			ptt:           ptt,
+			viewOnce:      viewOnce,
 		})
 		if err != nil {
 			return sendDelegateResponse{}, err

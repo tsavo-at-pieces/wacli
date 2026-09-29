@@ -304,6 +304,12 @@ func chatFlagsString(c store.Chat) string {
 	if c.Muted() {
 		flags = append(flags, "muted")
 	}
+	if c.Locked {
+		flags = append(flags, "locked")
+	}
+	if c.DeletedAt != nil {
+		flags = append(flags, "deleted")
+	}
 	if c.Unread {
 		if c.UnreadCount > 0 {
 			flags = append(flags, fmt.Sprintf("unread:%d", c.UnreadCount))

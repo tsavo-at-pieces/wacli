@@ -35,6 +35,8 @@ func newSendCmd(flags *rootFlags) *cobra.Command {
 	cmd.AddCommand(newSendPollCmd(flags))
 	cmd.AddCommand(newSendStatusCmd(flags))
 	cmd.AddCommand(newSendSelectCmd(flags))
+	cmd.AddCommand(newSendContactCmd(flags))
+	cmd.AddCommand(newSendEventCmd(flags))
 	return cmd
 }
 

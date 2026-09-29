@@ -49,6 +49,7 @@ type sendFileOptions struct {
 	replyTo       string
 	replyToSender string
 	ptt           bool
+	viewOnce      bool
 }
 
 type voiceNoteMetadata struct {
@@ -102,6 +103,9 @@ func sendFile(ctx context.Context, a interface {
 	}
 	if isNewsletter && (strings.TrimSpace(opts.replyTo) != "" || strings.TrimSpace(opts.replyToSender) != "") {
 		return sendFileOutcome{}, fmt.Errorf("quoted file replies are not supported for channels")
+	}
+	if err := validateViewOnceTarget(opts.viewOnce, to, mediaType, opts.ptt); err != nil {
+		return sendFileOutcome{}, err
 	}
 
 	var up whatsmeow.UploadResponse
@@ -163,6 +167,11 @@ func sendFile(ctx context.Context, a interface {
 		}
 	}
 	attachSendFileReplyContext(msg, replyContext)
+	if opts.viewOnce {
+		if msg, err = wa.WrapViewOnce(msg); err != nil {
+			return sendFileOutcome{}, err
+		}
+	}
 
 	var id types.MessageID
 	if isNewsletter {
@@ -224,14 +233,18 @@ func sendFile(ctx context.Context, a interface {
 		}
 	}
 
+	meta := map[string]string{
+		"name":      name,
+		"mime_type": mimeType,
+		"media":     mediaType,
+		"ptt":       strconv.FormatBool(opts.ptt),
+	}
+	if opts.viewOnce {
+		meta["view_once"] = "true"
+	}
 	return sendFileOutcome{
-		id: id,
-		meta: map[string]string{
-			"name":      name,
-			"mime_type": mimeType,
-			"media":     mediaType,
-			"ptt":       strconv.FormatBool(opts.ptt),
-		},
+		id:           id,
+		meta:         meta,
 		storeWarning: storeErr,
 	}, nil
 }

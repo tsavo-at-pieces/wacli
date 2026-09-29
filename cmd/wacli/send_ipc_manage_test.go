@@ -201,6 +201,10 @@ func (f *fakeManagementWA) DeleteMessageForMe(_ context.Context, info types.Mess
 }
 
 func (f *fakeManagementWA) SendProtoMessage(_ context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error) {
+	if desc := describeChatsMessagesProto(msg); desc != "" {
+		f.log.add("send %s %s", to, desc)
+		return "SENT01", nil
+	}
 	f.log.add("send %s %q forwarded=%t", to, msg.GetExtendedTextMessage().GetText(), msg.GetExtendedTextMessage().GetContextInfo().GetIsForwarded())
 	return "FWD01", nil
 }

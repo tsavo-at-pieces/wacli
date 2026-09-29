@@ -50,6 +50,7 @@ type delegatedManagementApp interface {
 	delegatedChatStateApp
 	delegatedContactApp
 	messageMutationApp
+	chatsMessagesApp
 }
 
 // executeDelegatedManagement runs a chat, group, contact or message management
@@ -97,6 +98,9 @@ func executeDelegatedManagement(ctx context.Context, a delegatedManagementApp, r
 	default:
 		if resp, ok, err := executeDelegatedGroupKind(ctx, a, req); ok {
 			return resp, err
+		}
+		if isChatsMessagesKind(req.Kind) {
+			return executeDelegatedChatsMessages(ctx, a, req)
 		}
 		return sendDelegateResponse{}, fmt.Errorf("unsupported send kind %q", req.Kind)
 	}

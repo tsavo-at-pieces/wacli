@@ -22,6 +22,7 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 	var replyTo string
 	var replyToSender string
 	var ptt bool
+	var viewOnce bool
 	postSendWait := postSendRetryReceiptWait
 
 	cmd := &cobra.Command{
@@ -52,7 +53,7 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 					delegateFile = abs
 				}
 				resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
-					Kind:           "file",
+					Kind:           sendFileDelegateKind(viewOnce),
 					To:             to,
 					Pick:           pick,
 					File:           delegateFile,
@@ -67,7 +68,7 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 				})
 				if delegated {
 					if delegateErr != nil {
-						return delegateErr
+						return explainUnsupportedDelegateKind(delegateErr, sendFileDelegateKind(viewOnce))
 					}
 					return writeDelegatedSendOutput(flags, "file", resp)
 				}
@@ -100,6 +101,7 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 					replyTo:       replyTo,
 					replyToSender: replyToSender,
 					ptt:           ptt,
+					viewOnce:      viewOnce,
 				})
 			})
 			if err != nil {
@@ -132,6 +134,7 @@ func newSendFileCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&replyTo, "reply-to", "", "message ID to quote/reply to")
 	cmd.Flags().StringVar(&replyToSender, "reply-to-sender", "", "sender JID of the quoted message (required for unsynced group replies)")
 	cmd.Flags().BoolVar(&ptt, "ptt", false, "send OGG/Opus audio as a WhatsApp voice note")
+	cmd.Flags().BoolVar(&viewOnce, "view-once", false, "send an image, video or voice note as view once")
 	cmd.Flags().DurationVar(&postSendWait, "post-send-wait", postSendRetryReceiptWait, "keep the connection alive after send so retry receipts can be handled (0 disables)")
 	return cmd
 }

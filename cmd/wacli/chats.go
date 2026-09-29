@@ -34,6 +34,14 @@ func newChatsCmd(flags *rootFlags) *cobra.Command {
 	cmd.AddCommand(newChatsMarkReadCmd(flags, true))
 	cmd.AddCommand(newChatsMarkReadCmd(flags, false))
 	cmd.AddCommand(newChatsCleanupCmd(flags))
+	cmd.AddCommand(newChatsDeleteCmd(flags))
+	cmd.AddCommand(newChatsClearCmd(flags))
+	cmd.AddCommand(newChatsLockCmd(flags, true))
+	cmd.AddCommand(newChatsLockCmd(flags, false))
+	cmd.AddCommand(newChatsDisappearingCmd(flags))
+	cmd.AddCommand(newChatsFavoriteCmd(flags, true))
+	cmd.AddCommand(newChatsFavoriteCmd(flags, false))
+	cmd.AddCommand(newChatsListsCmd(flags))
 	return cmd
 }
 
@@ -44,6 +52,8 @@ func newChatsListCmd(flags *rootFlags) *cobra.Command {
 	var pinned, noPinned bool
 	var muted, noMuted bool
 	var unread, noUnread bool
+	var locked, noLocked, deleted bool
+	var list string
 	cmd := &cobra.Command{
 		Use:   "list",
 		Short: "List chats",
@@ -58,6 +68,9 @@ func newChatsListCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			if err := validateBoolFilter("unread", unread, noUnread); err != nil {
+				return err
+			}
+			if err := validateBoolFilter("locked", locked, noLocked); err != nil {
 				return err
 			}
 
@@ -77,6 +90,13 @@ func newChatsListCmd(flags *rootFlags) *cobra.Command {
 				Pinned:   boolFilter(pinned, noPinned),
 				Muted:    boolFilter(muted, noMuted),
 				Unread:   boolFilter(unread, noUnread),
+				Locked:   boolFilter(locked, noLocked),
+				Deleted:  boolFilter(deleted, false),
+			}
+			if strings.TrimSpace(list) != "" {
+				if filter.JIDs, err = chatListFilterJIDs(ctx, a, list); err != nil {
+					return err
+				}
 			}
 			chats, err := a.DB().ListChatsFiltered(filter)
 			if err != nil {
@@ -111,6 +131,10 @@ func newChatsListCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().BoolVar(&noMuted, "no-muted", false, "exclude muted chats")
 	cmd.Flags().BoolVar(&unread, "unread", false, "show only unread chats")
 	cmd.Flags().BoolVar(&noUnread, "no-unread", false, "exclude unread chats")
+	cmd.Flags().BoolVar(&locked, "locked", false, "show only locked chats")
+	cmd.Flags().BoolVar(&noLocked, "no-locked", false, "exclude locked chats")
+	cmd.Flags().BoolVar(&deleted, "deleted", false, "show only chats deleted on WhatsApp (hidden otherwise)")
+	cmd.Flags().StringVar(&list, "list", "", "show only chats in this WhatsApp list (ID, name, or favorites)")
 	return cmd
 }
 
@@ -141,6 +165,7 @@ func newChatsShowCmd(flags *rootFlags) *cobra.Command {
 			}
 			fmt.Fprintf(os.Stdout, "JID: %s\nKind: %s\nName: %s\nLast: %s\nArchived: %t\nPinned: %t\nMuted: %t\nMuted until: %s\nUnread: %t\nUnread count: %d\n",
 				sanitize(c.JID), sanitize(c.Kind), sanitize(c.Name), c.LastMessageTS.Local().Format(time.RFC3339), c.Archived, c.Pinned, c.Muted(), formatMutedUntil(c.MutedUntil), c.Unread, c.UnreadCount)
+			writeChatActionState(os.Stdout, c)
 			return nil
 		},
 	}

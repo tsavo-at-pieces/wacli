@@ -18,6 +18,7 @@ func newSendVoiceCmd(flags *rootFlags) *cobra.Command {
 	var mimeOverride string
 	var replyTo string
 	var replyToSender string
+	var viewOnce bool
 	postSendWait := postSendRetryReceiptWait
 
 	cmd := &cobra.Command{
@@ -44,7 +45,7 @@ func newSendVoiceCmd(flags *rootFlags) *cobra.Command {
 					delegateFile = abs
 				}
 				resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
-					Kind:           "voice",
+					Kind:           sendVoiceDelegateKind(viewOnce),
 					To:             to,
 					Pick:           pick,
 					File:           delegateFile,
@@ -55,7 +56,7 @@ func newSendVoiceCmd(flags *rootFlags) *cobra.Command {
 				})
 				if delegated {
 					if delegateErr != nil {
-						return delegateErr
+						return explainUnsupportedDelegateKind(delegateErr, sendVoiceDelegateKind(viewOnce))
 					}
 					return writeDelegatedSendOutput(flags, "voice", resp)
 				}
@@ -85,6 +86,7 @@ func newSendVoiceCmd(flags *rootFlags) *cobra.Command {
 					replyTo:       replyTo,
 					replyToSender: replyToSender,
 					ptt:           true,
+					viewOnce:      viewOnce,
 				})
 			})
 			if err != nil {
@@ -113,6 +115,7 @@ func newSendVoiceCmd(flags *rootFlags) *cobra.Command {
 	cmd.Flags().StringVar(&mimeOverride, "mime", "", "override detected mime type")
 	cmd.Flags().StringVar(&replyTo, "reply-to", "", "message ID to quote/reply to")
 	cmd.Flags().StringVar(&replyToSender, "reply-to-sender", "", "sender JID of the quoted message (required for unsynced group replies)")
+	cmd.Flags().BoolVar(&viewOnce, "view-once", false, "send the voice note as view once")
 	cmd.Flags().DurationVar(&postSendWait, "post-send-wait", postSendRetryReceiptWait, "keep the connection alive after send so retry receipts can be handled (0 disables)")
 	return cmd
 }
