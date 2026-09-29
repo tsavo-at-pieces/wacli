@@ -547,6 +547,11 @@ func (a *App) storeParsedMessage(ctx context.Context, pm wa.ParsedMessage) error
 			return err
 		}
 	}
+	if pm.Pin != nil {
+		if err := a.storeParsedPin(chatJID, senderJID, pm); err != nil {
+			return err
+		}
+	}
 	if pm.StarredKnown {
 		return a.db.SetStarred(store.SetStarredParams{
 			ChatJID:   chatJID,

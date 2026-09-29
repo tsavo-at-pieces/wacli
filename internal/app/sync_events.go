@@ -108,7 +108,9 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			a.handleLiveCallEvent(ctx, v)
 		case *events.AppState, *events.Star, *events.DeleteForMe,
 			*events.Archive, *events.Pin, *events.Mute, *events.MarkChatAsRead,
-			*events.UserStatusMute:
+			*events.UserStatusMute,
+			*events.DeleteChat, *events.ClearChat, *events.LabelEdit, *events.LabelAssociationChat,
+			*events.AppStateSyncComplete:
 			lastEvent.Store(nowUTC().UnixNano())
 			a.handleAppStatePersistenceEvent(ctx, v, nil)
 		case *events.Contact:
@@ -335,6 +337,9 @@ func (a *App) persistAppStateEvent(ctx context.Context, evt any, tracker *appSta
 	switch v := evt.(type) {
 	case *events.AppState:
 		err = a.handleLiveCallEvent(ctx, v)
+		if err == nil {
+			err = a.persistChatAppStateEvent(ctx, v)
+		}
 	case *events.Star:
 		err = a.handleStarEvent(ctx, v)
 	case *events.DeleteForMe:
@@ -343,6 +348,8 @@ func (a *App) persistAppStateEvent(ctx context.Context, evt any, tracker *appSta
 		err = a.handleChatStateEvent(ctx, v)
 	case *events.UserStatusMute:
 		err = a.handleUserStatusMuteEvent(ctx, v)
+	default:
+		err = a.persistChatAppStateEvent(ctx, v)
 	}
 	if tracker != nil {
 		tracker.record(err)
@@ -357,12 +364,15 @@ func appStateCollectionsForEvent(evt any) []appstate.WAPatchName {
 	case *events.Mute, *events.Star, *events.DeleteForMe, *events.UserStatusMute:
 		return []appstate.WAPatchName{appstate.WAPatchRegularHigh}
 	case *events.AppState:
+		if collections := chatAppStateCollections(v); collections != nil {
+			return collections
+		}
 		if v == nil || v.SyncActionValue == nil || (v.GetCallLogAction() == nil && v.GetDeleteIndividualCallLog() == nil) {
 			return nil
 		}
 		return appstate.AllPatchNames[:]
 	default:
-		return nil
+		return chatAppStateCollections(evt)
 	}
 }
 

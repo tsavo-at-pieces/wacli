@@ -88,7 +88,16 @@ type fakeWA struct {
 	presenceCalls   []types.Presence
 	sendPresenceErr error
 
-	statusChannels fakeStatusChannelsState
+	statusChannels    fakeStatusChannelsState
+	appStatePatches   []appstate.PatchInfo
+	appStatePatchErr  error
+	disappearingCalls []fakeDisappearingCall
+	eventMessages     []*waProto.Message
+}
+
+type fakeDisappearingCall struct {
+	chat  types.JID
+	timer time.Duration
 }
 
 type fakeArchiveCall struct {
@@ -992,4 +1001,26 @@ func (f *fakeWA) SetPrivacySetting(ctx context.Context, name types.PrivacySettin
 
 func (f *fakeWA) SetDefaultDisappearingTimer(ctx context.Context, timer time.Duration) error {
 	return nil
+}
+func (f *fakeWA) SendAppStatePatch(ctx context.Context, patch appstate.PatchInfo, beforeApply func()) ([]any, error) {
+	f.mu.Lock()
+	f.appStatePatches = append(f.appStatePatches, patch)
+	err := f.appStatePatchErr
+	f.mu.Unlock()
+	beforeApply()
+	return nil, err
+}
+
+func (f *fakeWA) SetDisappearingTimer(ctx context.Context, chat types.JID, timer time.Duration) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.disappearingCalls = append(f.disappearingCalls, fakeDisappearingCall{chat: chat, timer: timer})
+	return nil
+}
+
+func (f *fakeWA) SendEventMessage(ctx context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.eventMessages = append(f.eventMessages, msg)
+	return "event-id", nil
 }

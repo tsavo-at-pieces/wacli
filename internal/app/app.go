@@ -13,6 +13,7 @@ import (
 	"github.com/openclaw/wacli/internal/store"
 	"github.com/openclaw/wacli/internal/wa"
 	"go.mau.fi/whatsmeow"
+	"go.mau.fi/whatsmeow/appstate"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
 	"go.mau.fi/whatsmeow/proto/waCommon"
 	"go.mau.fi/whatsmeow/proto/waE2E"
@@ -130,6 +131,9 @@ type WAClient interface {
 	GetPrivacySettings(ctx context.Context) (types.PrivacySettings, error)
 	SetPrivacySetting(ctx context.Context, name types.PrivacySettingType, value types.PrivacySetting) (types.PrivacySettings, error)
 	SetDefaultDisappearingTimer(ctx context.Context, timer time.Duration) error
+	SendAppStatePatch(ctx context.Context, patch appstate.PatchInfo, beforeApply func()) ([]any, error)
+	SetDisappearingTimer(ctx context.Context, chat types.JID, timer time.Duration) error
+	SendEventMessage(ctx context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error)
 }
 
 type Options struct {

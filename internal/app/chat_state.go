@@ -37,7 +37,9 @@ func (a *App) AddChatStatePersistenceHandler(ctx context.Context) (func(), error
 		switch evt.(type) {
 		case *events.AppState, *events.Star, *events.DeleteForMe,
 			*events.Archive, *events.Pin, *events.Mute, *events.MarkChatAsRead,
-			*events.UserStatusMute:
+			*events.UserStatusMute,
+			*events.DeleteChat, *events.ClearChat, *events.LabelEdit, *events.LabelAssociationChat,
+			*events.AppStateSyncComplete:
 			a.handleAppStatePersistenceEvent(ctx, evt, nil)
 		}
 	})
