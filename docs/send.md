@@ -99,6 +99,7 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 
 ## Files
 
+- Set `WACLI_MEDIA_ROOTS` to a colon-separated list of absolute directories to confine which local files `send file`, `send voice`, `send sticker` and `send status --file` may upload. The file must resolve, symlinks included, to a path inside one of them; anything else is refused before the store is opened or a running `sync --follow` is asked to send. Unset keeps the default of no restriction. It is a guardrail for agents driving the CLI, so a prompt-injected request cannot attach an arbitrary file from the machine.
 - File uploads are capped at 100 MiB.
 - MIME type is detected automatically unless `--mime` is set.
 - WhatsApp derives the message bubble (image, video, audio, or document) from the message type, which wacli picks from the MIME by default. Use `--as auto|document|audio|image|video` to force it. For example, `--mime audio/mpeg --as document` delivers an mp3 as a downloadable document instead of an inline audio bubble, matching how the mobile app attaches files. `--as auto` (the default) keeps MIME-based detection. `--ptt` only accepts `--as auto` or `--as audio`.
