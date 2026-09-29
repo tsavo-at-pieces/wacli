@@ -203,6 +203,12 @@ var groupToggles = map[string]groupToggle{
 			return client.SetGroupLocked(ctx, jid, on)
 		},
 	},
+	groupJoinApprovalKind: {
+		use: "join-approval", short: "Set whether admins must approve new members who join by link", jsonKey: "join_approval",
+		apply: func(ctx context.Context, client appcore.WAClient, jid types.JID, on bool) error {
+			return client.SetGroupJoinApprovalMode(ctx, jid, on)
+		},
+	},
 }
 
 func newGroupsAnnounceOnlyCmd(flags *rootFlags) *cobra.Command {
@@ -211,6 +217,10 @@ func newGroupsAnnounceOnlyCmd(flags *rootFlags) *cobra.Command {
 
 func newGroupsLockedCmd(flags *rootFlags) *cobra.Command {
 	return newGroupsToggleCmd(flags, groupLockedKind)
+}
+
+func newGroupsJoinApprovalCmd(flags *rootFlags) *cobra.Command {
+	return newGroupsToggleCmd(flags, groupJoinApprovalKind)
 }
 
 func newGroupsToggleCmd(flags *rootFlags, kind string) *cobra.Command {

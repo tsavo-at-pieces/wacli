@@ -84,6 +84,8 @@ type sendDelegateRequest struct {
 	// Group commands (send_ipc_groups.go).
 	Topic         string   `json:"topic,omitempty"`
 	Enabled       bool     `json:"enabled,omitempty"`
+	MemberAddMode string   `json:"member_add_mode,omitempty"`
+	Photo         []byte   `json:"photo,omitempty"`
 	Groups        []string `json:"groups,omitempty"`
 	PruneDays     int      `json:"prune_days,omitempty"`
 	IncludeActive bool     `json:"include_active,omitempty"`

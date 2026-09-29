@@ -6,8 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"image"
+	"image/color"
+	"image/jpeg"
+	"image/png"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"reflect"
 	"slices"
 	"strings"
@@ -22,6 +27,14 @@ import (
 	"go.mau.fi/whatsmeow/types"
 )
 
+// Fictional identities only; see send_ipc_manage_test.go for the rest.
+const (
+	grpAnnouncements = "120363000000000004@g.us"
+	grpSubgroup      = "120363000000000005@g.us"
+	grpInviteCode    = "FakeInviteCode02"
+	grpPictureID     = "PIC01"
+)
+
 func testJID(raw string) types.JID {
 	jid, err := types.ParseJID(raw)
 	if err != nil {
@@ -30,7 +43,7 @@ func testJID(raw string) types.JID {
 	return jid
 }
 
-// fakeGroupsWA adds the group calls to the management fake.
+// fakeGroupsWA adds the group and community calls to the management fake.
 // Groups it knows answer GetGroupInfo, and changes apply to them as WhatsApp
 // would apply them, so the refreshed local snapshot shows the result.
 type fakeGroupsWA struct {
@@ -39,6 +52,10 @@ type fakeGroupsWA struct {
 	groups         map[types.JID]*types.GroupInfo
 	requests       []types.GroupParticipantRequest
 	requestResults []types.GroupParticipant
+	preview        *types.GroupInfo
+	subgroups      []*types.GroupLinkTarget
+	members        []types.JID
+	photo          []byte
 }
 
 func (f *fakeGroupsWA) GetGroupInfo(_ context.Context, group types.JID) (*types.GroupInfo, error) {
@@ -80,6 +97,30 @@ func (f *fakeGroupsWA) SetGroupLocked(_ context.Context, group types.JID, on boo
 	return nil
 }
 
+func (f *fakeGroupsWA) SetGroupJoinApprovalMode(_ context.Context, group types.JID, on bool) error {
+	f.log.add("join-approval %s %t", group, on)
+	f.update(group, func(g *types.GroupInfo) { g.IsJoinApprovalRequired = on })
+	return nil
+}
+
+func (f *fakeGroupsWA) SetGroupMemberAddMode(_ context.Context, group types.JID, mode types.GroupMemberAddMode) error {
+	f.log.add("member-add-mode %s %s", group, mode)
+	f.update(group, func(g *types.GroupInfo) { g.MemberAddMode = mode })
+	return nil
+}
+
+func (f *fakeGroupsWA) SetGroupPhoto(_ context.Context, group types.JID, avatar []byte) (string, error) {
+	if avatar == nil {
+		f.log.add("photo %s remove", group)
+		return "remove", nil
+	}
+	f.log.add("photo %s jpeg=%t", group, bytes.HasPrefix(avatar, []byte{0xff, 0xd8}))
+	f.mu.Lock()
+	f.photo = slices.Clone(avatar)
+	f.mu.Unlock()
+	return grpPictureID, nil
+}
+
 func (f *fakeGroupsWA) GetGroupRequestParticipants(_ context.Context, group types.JID) ([]types.GroupParticipantRequest, error) {
 	f.log.add("requests %s", group)
 	return f.requests, nil
@@ -88,6 +129,33 @@ func (f *fakeGroupsWA) GetGroupRequestParticipants(_ context.Context, group type
 func (f *fakeGroupsWA) UpdateGroupRequestParticipants(_ context.Context, group types.JID, users []types.JID, action wa.GroupParticipantRequestAction) ([]types.GroupParticipant, error) {
 	f.log.add("requests %s %s %v", action, group, users)
 	return f.requestResults, nil
+}
+
+func (f *fakeGroupsWA) GetGroupInfoFromLink(_ context.Context, code string) (*types.GroupInfo, error) {
+	f.log.add("invite-info %s", code)
+	return f.preview, nil
+}
+
+func (f *fakeGroupsWA) GetSubGroups(_ context.Context, parent types.JID) ([]*types.GroupLinkTarget, error) {
+	f.log.add("subgroups %s", parent)
+	return f.subgroups, nil
+}
+
+func (f *fakeGroupsWA) LinkGroup(_ context.Context, parent, child types.JID) error {
+	f.log.add("link %s %s", parent, child)
+	f.update(child, func(g *types.GroupInfo) { g.LinkedParentJID = parent })
+	return nil
+}
+
+func (f *fakeGroupsWA) UnlinkGroup(_ context.Context, parent, child types.JID) error {
+	f.log.add("unlink %s %s", parent, child)
+	f.update(child, func(g *types.GroupInfo) { g.LinkedParentJID = types.EmptyJID })
+	return nil
+}
+
+func (f *fakeGroupsWA) GetLinkedGroupsParticipants(_ context.Context, parent types.JID) ([]types.JID, error) {
+	f.log.add("community-participants %s", parent)
+	return f.members, nil
 }
 
 // ResolveLIDToPN knows one fictional LID/phone pair, as a session would.
@@ -223,6 +291,41 @@ func jsonString(t *testing.T, s string) string {
 	return string(raw)
 }
 
+// renderTable is what newTableWriter prints for rows of tab-separated cells.
+func renderTable(t *testing.T, rows ...string) string {
+	t.Helper()
+	var buf bytes.Buffer
+	w := newTableWriter(&buf)
+	for _, row := range rows {
+		fmt.Fprintln(w, row)
+	}
+	if err := w.Flush(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+// writeTestPNG writes a fictional w×h PNG and returns its path.
+func writeTestPNG(t *testing.T, dir string, w, h int) string {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.Set(x, y, color.RGBA{R: uint8(x), G: uint8(y), B: 128, A: 255})
+		}
+	}
+	path := filepath.Join(dir, "group-photo.png")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer f.Close()
+	if err := png.Encode(f, img); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
 func seedPruneRows(t *testing.T, db *store.DB) {
 	t.Helper()
 	now := time.Now().UTC()
@@ -285,11 +388,21 @@ type groupCommandCase struct {
 }
 
 func groupCommandCases(t *testing.T) []groupCommandCase {
+	photoPath := writeTestPNG(t, t.TempDir(), 800, 400)
 	info := testGroupInfo()
 	requestedAt := time.Unix(1790000000, 0).UTC()
 	requests := []types.GroupParticipantRequest{
 		{JID: testJID(mgmtLID), RequestedAt: requestedAt},
 		{JID: testJID(mgmtDialed), RequestedAt: requestedAt.Add(time.Hour)},
+	}
+	preview := testGroupInfo()
+	preview.JID = testJID(mgmtJoined)
+	preview.Participants = preview.Participants[:1]
+	preview.ParticipantCount = 7
+	preview.IsJoinApprovalRequired = true
+	subgroups := []*types.GroupLinkTarget{
+		{JID: testJID(grpAnnouncements), GroupName: types.GroupName{Name: "Announcements"}, GroupIsDefaultSub: types.GroupIsDefaultSub{IsDefaultSubGroup: true}},
+		{JID: testJID(grpSubgroup), GroupName: types.GroupName{Name: "Test <sub>"}},
 	}
 	created := info.GroupCreated.Local().Format(time.RFC3339)
 	summary := "JID: " + mgmtGroup + "\nName: Test <group>\nOwner: " + mgmtPhone + "\nType: group\nCreated: " + created + "\nParticipants: 2\n"
@@ -374,6 +487,73 @@ func groupCommandCases(t *testing.T) []groupCommandCase {
 			json:  directJSON(t, map[string]any{"jid": mgmtGroup, "locked": false}),
 		},
 		{
+			name:  "groups join-approval on",
+			kind:  groupJoinApprovalKind,
+			args:  []string{"groups", "join-approval", "--jid", mgmtGroup, "--on"},
+			write: true,
+			seed:  seedTestGroup,
+			calls: []string{"join-approval " + mgmtGroup + " true", refresh},
+			human: "OK\n",
+			json:  directJSON(t, map[string]any{"jid": mgmtGroup, "join_approval": true}),
+		},
+		{
+			name:  "groups member-add-mode admins",
+			kind:  groupMemberAddModeKind,
+			args:  []string{"groups", "member-add-mode", "--jid", mgmtGroup, "--admins"},
+			write: true,
+			seed:  seedTestGroup,
+			request: func(t *testing.T, req sendDelegateRequest) {
+				if req.MemberAddMode != string(types.GroupMemberAddModeAdmin) {
+					t.Fatalf("member-add-mode request = %+v", req)
+				}
+			},
+			calls: []string{"member-add-mode " + mgmtGroup + " admin_add", refresh},
+			human: "OK\n",
+			json:  directJSON(t, map[string]any{"jid": mgmtGroup, "member_add_mode": "admin_add"}),
+		},
+		{
+			name:  "groups member-add-mode all",
+			kind:  groupMemberAddModeKind,
+			args:  []string{"groups", "member-add-mode", "--jid", mgmtGroup, "--all"},
+			write: true,
+			seed:  seedTestGroup,
+			calls: []string{"member-add-mode " + mgmtGroup + " all_member_add", refresh},
+			human: "OK\n",
+			json:  directJSON(t, map[string]any{"jid": mgmtGroup, "member_add_mode": "all_member_add"}),
+		},
+		{
+			name:  "groups photo set",
+			kind:  groupPhotoSetKind,
+			args:  []string{"groups", "photo", "set", "--jid", mgmtGroup, "--file", photoPath},
+			write: true,
+			seed:  seedTestGroup,
+			request: func(t *testing.T, req sendDelegateRequest) {
+				if req.File != "" {
+					t.Fatalf("photo request names a path %q; want only JPEG bytes", req.File)
+				}
+				img, err := jpeg.Decode(bytes.NewReader(req.Photo))
+				if err != nil {
+					t.Fatalf("delegated photo is not JPEG: %v", err)
+				}
+				if b := img.Bounds(); b.Dx() != 640 || b.Dy() != 320 {
+					t.Fatalf("delegated photo is %dx%d, want it scaled to 640x320", b.Dx(), b.Dy())
+				}
+			},
+			calls: []string{"photo " + mgmtGroup + " jpeg=true", refresh},
+			human: "Group photo updated (id: " + grpPictureID + ")\n",
+			json:  directJSON(t, map[string]any{"jid": mgmtGroup, "picture_id": grpPictureID}),
+		},
+		{
+			name:  "groups photo remove",
+			kind:  groupPhotoRemoveKind,
+			args:  []string{"groups", "photo", "remove", "--jid", mgmtGroup},
+			write: true,
+			seed:  seedTestGroup,
+			calls: []string{"photo " + mgmtGroup + " remove", refresh},
+			human: "Group photo removed.\n",
+			json:  directJSON(t, map[string]any{"jid": mgmtGroup, "removed": true}),
+		},
+		{
 			name:    "groups requests list",
 			kind:    groupRequestsListKind,
 			args:    []string{"groups", "requests", "list", "--jid", mgmtGroup},
@@ -394,6 +574,82 @@ func groupCommandCases(t *testing.T) []groupCommandCase {
 			calls: []string{"invite-link " + mgmtGroup + " reset=false"},
 			human: mgmtInviteLink + "\n",
 			json:  directJSON(t, map[string]any{"jid": mgmtGroup, "link": mgmtInviteLink}),
+		},
+		{
+			name: "groups invite info",
+			kind: groupInviteInfoKind,
+			args: []string{"groups", "invite", "info", "https://chat.whatsapp.com/" + grpInviteCode},
+			seed: func(t *testing.T, f *fakeGroupsApp) { f.gwa.preview = preview },
+			request: func(t *testing.T, req sendDelegateRequest) {
+				if req.InviteCode != grpInviteCode {
+					t.Fatalf("invite code = %q, want the code from the link", req.InviteCode)
+				}
+			},
+			calls: []string{"invite-info " + grpInviteCode},
+			human: "JID: " + mgmtJoined + "\nName: Test <group>\nOwner: " + mgmtPhone + "\nType: group\nCreated: " + created +
+				"\nParticipants: 7\nDescription: Old fictional topic\nJoin approval: required\n",
+			json: directJSON(t, preview),
+			after: func(t *testing.T, f *fakeGroupsApp) {
+				if groups, err := f.db.ListGroups("", 50); err != nil || len(groups) != 0 {
+					t.Fatalf("stored groups = %+v, %v; a preview must not store the group", groups, err)
+				}
+			},
+		},
+		{
+			name:  "groups community subgroups",
+			kind:  communitySubgroupsKind,
+			args:  []string{"groups", "community", "subgroups", "--jid", mgmtParent},
+			seed:  func(t *testing.T, f *fakeGroupsApp) { f.gwa.subgroups = subgroups },
+			calls: []string{"subgroups " + mgmtParent},
+			human: renderTable(t, "NAME\tJID\tDEFAULT", "Announcements\t"+grpAnnouncements+"\tyes", "Test <sub>\t"+grpSubgroup+"\t-"),
+			json:  directJSON(t, subgroups),
+		},
+		{
+			name: "groups community participants",
+			kind: communityParticipantsKind,
+			args: []string{"groups", "community", "participants", "--jid", mgmtParent},
+			seed: func(t *testing.T, f *fakeGroupsApp) {
+				f.gwa.members = []types.JID{testJID(mgmtLID), testJID(mgmtDialed)}
+			},
+			calls: []string{"community-participants " + mgmtParent},
+			human: renderTable(t, "JID\tPHONE", mgmtLID+"\t+15550000001", mgmtDialed+"\t+12025550142"),
+			json: directJSON(t, []communityParticipantEntry{
+				{JID: mgmtLID, PhoneNumber: "+15550000001"},
+				{JID: mgmtDialed, PhoneNumber: "+12025550142"},
+			}),
+		},
+		{
+			name:  "groups community link",
+			kind:  communityLinkKind,
+			args:  []string{"groups", "community", "link", "--parent", mgmtParent, "--child", mgmtGroup},
+			write: true,
+			seed:  seedTestGroup,
+			request: func(t *testing.T, req sendDelegateRequest) {
+				if req.To != mgmtGroup || req.LinkedParent != mgmtParent {
+					t.Fatalf("link request = %+v", req)
+				}
+			},
+			calls: []string{"link " + mgmtParent + " " + mgmtGroup, refresh},
+			human: "OK\n",
+			json:  directJSON(t, map[string]any{"parent": mgmtParent, "child": mgmtGroup, "linked": true}),
+			after: wantStoredGroup(mgmtGroup, func(g store.Group) bool { return g.LinkedParentJID == mgmtParent }),
+		},
+		{
+			name:  "groups community unlink",
+			kind:  communityUnlinkKind,
+			args:  []string{"groups", "community", "unlink", "--parent", mgmtParent, "--child", mgmtGroup},
+			write: true,
+			seed: func(t *testing.T, f *fakeGroupsApp) {
+				seedTestGroup(t, f)
+				f.gwa.groups[testJID(mgmtGroup)].LinkedParentJID = testJID(mgmtParent)
+				if err := f.db.UpsertGroupWithHierarchy(mgmtGroup, "Test <group>", mgmtPhone, time.Now(), false, mgmtParent); err != nil {
+					t.Fatalf("seed linked group: %v", err)
+				}
+			},
+			calls: []string{"unlink " + mgmtParent + " " + mgmtGroup, refresh},
+			human: "OK\n",
+			json:  directJSON(t, map[string]any{"parent": mgmtParent, "child": mgmtGroup, "unlinked": true}),
+			after: wantStoredGroup(mgmtGroup, func(g store.Group) bool { return g.LinkedParentJID == "" }),
 		},
 		{
 			name:  "groups prune",
@@ -627,13 +883,25 @@ func TestGroupKindExecutorsMatchCommandCases(t *testing.T) {
 
 // Bad input fails in the caller before anything reaches the sync process.
 func TestGroupCommandsValidateBeforeDelegating(t *testing.T) {
+	notImage := filepath.Join(t.TempDir(), "not-an-image.png")
+	if err := os.WriteFile(notImage, []byte("fictional text, not an image"), 0o600); err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		name string
 		args []string
 		want string
 	}{
 		{"topic on a user JID", []string{"groups", "topic", "--jid", mgmtPhone, "--text", "x"}, "expected group JID"},
-		{"toggle without a mode", []string{"groups", "locked", "--jid", mgmtGroup}, "exactly one of --on or --off"},
+		{"toggle without a mode", []string{"groups", "join-approval", "--jid", mgmtGroup}, "exactly one of --on or --off"},
+		{"member-add-mode with both modes", []string{"groups", "member-add-mode", "--jid", mgmtGroup, "--admins", "--all"}, "exactly one of --admins or --all"},
+		{"member-add-mode with no mode", []string{"groups", "member-add-mode", "--jid", mgmtGroup}, "exactly one of --admins or --all"},
+		{"photo that is not an image", []string{"groups", "photo", "set", "--jid", mgmtGroup, "--file", notImage}, "read image"},
+		{"photo without a file", []string{"groups", "photo", "set", "--jid", mgmtGroup}, "--jid and --file are required"},
+		{"invite info without a code", []string{"groups", "invite", "info", "https://chat.whatsapp.com/"}, "invalid invite link or code"},
+		{"community link to itself", []string{"groups", "community", "link", "--parent", mgmtGroup, "--child", mgmtGroup}, "must be different groups"},
+		{"community unlink of a user", []string{"groups", "community", "unlink", "--parent", mgmtParent, "--child", mgmtPhone}, "parse --child"},
+		{"subgroups of a user", []string{"groups", "community", "subgroups", "--jid", mgmtPhone}, "expected group JID"},
 		{"requests approve with a bad user", []string{"groups", "requests", "approve", "--jid", mgmtGroup, "--user", "not a number"}, "invalid phone number"},
 	}
 	for _, tt := range tests {
@@ -647,6 +915,21 @@ func TestGroupCommandsValidateBeforeDelegating(t *testing.T) {
 				t.Fatalf("invalid command reached the sync process: %+v", reqs)
 			}
 		})
+	}
+}
+
+// WACLI_MEDIA_ROOTS confines the group photo like any other upload, and the
+// check runs before the sync process is asked to do anything.
+func TestGroupsPhotoSetHonorsMediaRootsBeforeDelegating(t *testing.T) {
+	photo := writeTestPNG(t, t.TempDir(), 16, 16)
+	t.Setenv(mediaRootsEnv, t.TempDir())
+	d := startGroupsDaemon(t, seedTestGroup)
+	stdout, stderr, err := d.run(t, false, []string{"groups", "photo", "set", "--jid", mgmtGroup, "--file", photo})
+	if err == nil || stdout != "" || !strings.Contains(stderr, "is outside "+mediaRootsEnv) {
+		t.Fatalf("err=%v stdout=%q stderr=%q, want the media-roots rejection", err, stdout, stderr)
+	}
+	if reqs := d.received(); len(reqs) != 0 {
+		t.Fatalf("confined photo reached the sync process: %+v", reqs)
 	}
 }
 
@@ -721,7 +1004,12 @@ func TestExecuteGroupKindsRejectInvalidRequests(t *testing.T) {
 		req  sendDelegateRequest
 		want string
 	}{
+		{"unknown member add mode", sendDelegateRequest{Kind: groupMemberAddModeKind, To: mgmtGroup, MemberAddMode: "everyone"}, "member add mode must be"},
+		{"photo without bytes", sendDelegateRequest{Kind: groupPhotoSetKind, To: mgmtGroup}, "no photo in the request"},
 		{"toggle on a user", sendDelegateRequest{Kind: groupLockedKind, To: mgmtPhone, Enabled: true}, "expected group JID"},
+		{"link to itself", sendDelegateRequest{Kind: communityLinkKind, To: mgmtGroup, LinkedParent: mgmtGroup}, "must be different groups"},
+		{"link without a parent", sendDelegateRequest{Kind: communityLinkKind, To: mgmtGroup}, "parse --parent"},
+		{"invite info without a code", sendDelegateRequest{Kind: groupInviteInfoKind}, "invalid invite link or code"},
 		{"requests with a bad user", sendDelegateRequest{Kind: groupRequestsApproveKind, To: mgmtGroup, Users: []string{"not a number"}}, "invalid phone number"},
 		{"prune with nothing confirmed", sendDelegateRequest{Kind: groupsPruneKind, PruneDays: 30}, "no confirmed groups"},
 		{"prune with negative days", sendDelegateRequest{Kind: groupsPruneKind, PruneDays: -1, Groups: []string{mgmtGroup}}, "must not be negative"},
@@ -863,6 +1151,7 @@ func TestLocalGroupReadsDoNotTakeStoreLock(t *testing.T) {
 }
 
 func TestSendDelegateRequestPreservesGroupFieldsInJSON(t *testing.T) {
+	photo := []byte{0xff, 0xd8, 0x00, 0x7f, 0xff, 0xd9}
 	tests := []struct {
 		name string
 		req  sendDelegateRequest
@@ -875,9 +1164,24 @@ func TestSendDelegateRequestPreservesGroupFieldsInJSON(t *testing.T) {
 			keys: []string{`"topic":` + jsonString(t, "Fictional <topic>"), `"enabled":true`},
 		},
 		{
+			name: "member add mode",
+			req:  sendDelegateRequest{Kind: groupMemberAddModeKind, To: mgmtGroup, MemberAddMode: "admin_add"},
+			keys: []string{`"member_add_mode":"admin_add"`},
+		},
+		{
+			name: "photo bytes",
+			req:  sendDelegateRequest{Kind: groupPhotoSetKind, To: mgmtGroup, Photo: photo},
+			keys: []string{`"photo":"/9gAf//Z"`},
+		},
+		{
 			name: "prune",
 			req:  sendDelegateRequest{Kind: groupsPruneKind, Groups: []string{mgmtGroup, mgmtJoined}, PruneDays: 180, IncludeActive: true},
 			keys: []string{`"groups":["` + mgmtGroup + `","` + mgmtJoined + `"]`, `"prune_days":180`, `"include_active":true`},
+		},
+		{
+			name: "community link",
+			req:  sendDelegateRequest{Kind: communityLinkKind, To: mgmtGroup, LinkedParent: mgmtParent},
+			keys: []string{`"to":"` + mgmtGroup + `"`, `"linked_parent":"` + mgmtParent + `"`},
 		},
 	}
 	for _, tt := range tests {
@@ -917,8 +1221,12 @@ func TestSendDelegateRequestPreservesGroupFieldsInJSON(t *testing.T) {
 func TestGroupResultsRoundTripUnchanged(t *testing.T) {
 	values := map[string]any{
 		"group info": testGroupInfo(),
-		"requests":   []requestListEntry{{JID: mgmtLID, PhoneNumber: "+15550000001", RequestedAt: time.Unix(1790000000, 0).UTC()}},
-		"pruned":     []prunedGroup{{JID: mgmtGroup, Name: "Test <group>"}},
+		"subgroups": []*types.GroupLinkTarget{
+			{JID: testJID(grpAnnouncements), GroupName: types.GroupName{Name: "Announcements", NameSetAt: time.Unix(1790000000, 0).UTC()}, GroupIsDefaultSub: types.GroupIsDefaultSub{IsDefaultSubGroup: true}},
+		},
+		"requests": []requestListEntry{{JID: mgmtLID, PhoneNumber: "+15550000001", RequestedAt: time.Unix(1790000000, 0).UTC()}},
+		"members":  []communityParticipantEntry{{JID: mgmtLID, PhoneNumber: "+15550000001"}, {JID: mgmtDialed}},
+		"pruned":   []prunedGroup{{JID: mgmtGroup, Name: "Test <group>"}},
 	}
 	for name, v := range values {
 		t.Run(name, func(t *testing.T) {
@@ -957,5 +1265,77 @@ func TestGroupResultsRoundTripUnchanged(t *testing.T) {
 	var entries []requestListEntry
 	if err := decodeGroupResult(nil, &entries); err != nil || entries != nil {
 		t.Fatalf("missing result decodes to %v, %v", entries, err)
+	}
+}
+
+func TestParseGroupInviteCode(t *testing.T) {
+	for raw, want := range map[string]string{
+		grpInviteCode:                                               grpInviteCode,
+		"  " + grpInviteCode + "\n":                                 grpInviteCode,
+		"https://chat.whatsapp.com/" + grpInviteCode:                grpInviteCode,
+		"HTTPS://Chat.WhatsApp.com/" + grpInviteCode + "/":          grpInviteCode,
+		"http://chat.whatsapp.com/invite/" + grpInviteCode:          grpInviteCode,
+		"chat.whatsapp.com/" + grpInviteCode + "?mode=fictional":    grpInviteCode,
+		"https://chat.whatsapp.com/" + grpInviteCode + "#fictional": grpInviteCode,
+	} {
+		got, err := parseGroupInviteCode(raw)
+		if err != nil || got != want {
+			t.Fatalf("parseGroupInviteCode(%q) = %q, %v; want %q", raw, got, err, want)
+		}
+	}
+	for _, raw := range []string{"", "   ", "https://chat.whatsapp.com/", "https://example.com/" + grpInviteCode, "two words"} {
+		if got, err := parseGroupInviteCode(raw); err == nil {
+			t.Fatalf("parseGroupInviteCode(%q) = %q, want an error", raw, got)
+		}
+	}
+}
+
+func TestParseMemberAddModeFlags(t *testing.T) {
+	tests := []struct {
+		set  []string
+		want types.GroupMemberAddMode
+		err  string
+	}{
+		{[]string{"admins=true"}, types.GroupMemberAddModeAdmin, ""},
+		{[]string{"all=true"}, types.GroupMemberAddModeAllMember, ""},
+		{nil, "", "exactly one"},
+		{[]string{"admins=true", "all=true"}, "", "exactly one"},
+		{[]string{"admins=false"}, "", "--admins=false"},
+		{[]string{"all=false"}, "", "--all=false"},
+	}
+	for _, tt := range tests {
+		cmd := newGroupsMemberAddModeCmd(&rootFlags{})
+		for _, kv := range tt.set {
+			name, value, _ := strings.Cut(kv, "=")
+			if err := cmd.Flags().Set(name, value); err != nil {
+				t.Fatal(err)
+			}
+		}
+		admins, _ := cmd.Flags().GetBool("admins")
+		all, _ := cmd.Flags().GetBool("all")
+		got, err := parseMemberAddModeFlags(cmd, admins, all)
+		if tt.err != "" {
+			if err == nil || !strings.Contains(err.Error(), tt.err) {
+				t.Fatalf("%v: err = %v, want %q", tt.set, err, tt.err)
+			}
+			continue
+		}
+		if err != nil || got != tt.want {
+			t.Fatalf("%v: got %q, %v; want %q", tt.set, got, err, tt.want)
+		}
+	}
+}
+
+func TestGroupsNewCommandsRegistered(t *testing.T) {
+	cmd := newGroupsCmd(&rootFlags{})
+	for _, path := range [][]string{
+		{"join-approval"}, {"member-add-mode"}, {"photo", "set"}, {"photo", "remove"},
+		{"invite", "info"}, {"community", "subgroups"}, {"community", "participants"},
+		{"community", "link"}, {"community", "unlink"},
+	} {
+		got, _, err := cmd.Find(path)
+		if err != nil || got == nil || got.Name() != path[len(path)-1] {
+			t.Fatalf("groups %v not registered: got=%v err=%v", path, got, err)
+		}
 	}
 }

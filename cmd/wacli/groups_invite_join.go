@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -17,6 +18,7 @@ func newGroupsInviteCmd(flags *rootFlags) *cobra.Command {
 		Short: "Manage group invite links",
 	}
 	cmd.AddCommand(newGroupsInviteLinkCmd(flags))
+	cmd.AddCommand(newGroupsInviteInfoCmd(flags))
 	return cmd
 }
 
@@ -67,6 +69,103 @@ func executeGroupInviteLinkGet(ctx context.Context, a waStoreApp, req sendDelega
 		return sendDelegateResponse{}, err
 	}
 	return sendDelegateResponse{OK: true, Chat: gjid.String(), Link: link}, nil
+}
+
+func newGroupsInviteInfoCmd(flags *rootFlags) *cobra.Command {
+	cmd := &cobra.Command{
+		Use:   "info <link-or-code>",
+		Short: "Preview the group behind an invite link without joining it",
+		Long: `Preview the group behind an invite link without joining it.
+
+Accepts a full https://chat.whatsapp.com/... link or the bare invite code.
+Nothing is joined and nothing is stored locally.`,
+		Args: cobra.ExactArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			code, err := parseGroupInviteCode(args[0])
+			if err != nil {
+				return err
+			}
+			if err := requireLiveRead(flags); err != nil {
+				return err
+			}
+			return runLiveGroupCommand(flags, sendDelegateRequest{Kind: groupInviteInfoKind, InviteCode: code}, func(resp sendDelegateResponse) error {
+				return writeGroupInvitePreview(flags, resp.Group)
+			})
+		},
+	}
+	return cmd
+}
+
+// parseGroupInviteCode takes an invite link or bare code and returns the code.
+func parseGroupInviteCode(raw string) (string, error) {
+	code := strings.TrimSpace(raw)
+	for _, scheme := range []string{"https://", "http://"} {
+		if len(code) >= len(scheme) && strings.EqualFold(code[:len(scheme)], scheme) {
+			code = code[len(scheme):]
+			break
+		}
+	}
+	const host = "chat.whatsapp.com/"
+	if len(code) >= len(host) && strings.EqualFold(code[:len(host)], host) {
+		code = strings.TrimPrefix(code[len(host):], "invite/")
+	}
+	if i := strings.IndexAny(code, "?#"); i >= 0 {
+		code = code[:i]
+	}
+	code = strings.TrimSuffix(code, "/")
+	if code == "" || strings.ContainsAny(code, "/ \t") {
+		return "", fmt.Errorf("invalid invite link or code %q", raw)
+	}
+	return code, nil
+}
+
+// executeGroupInviteInfo previews the group behind an invite code. It joins
+// nothing and stores nothing: the caller is not a member.
+func executeGroupInviteInfo(ctx context.Context, a waStoreApp, req sendDelegateRequest) (sendDelegateResponse, error) {
+	code, err := parseGroupInviteCode(req.InviteCode)
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	info, err := a.WA().GetGroupInfoFromLink(ctx, code)
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	if info == nil {
+		return sendDelegateResponse{}, fmt.Errorf("no group info for invite code %s", code)
+	}
+	raw, err := encodeGroupResult(info)
+	if err != nil {
+		return sendDelegateResponse{}, err
+	}
+	return sendDelegateResponse{OK: true, Chat: info.JID.String(), Group: raw}, nil
+}
+
+// writeGroupInvitePreview prints an invite preview: the whatsmeow group info
+// as-is with --json, otherwise a summary. A preview lists few participants
+// or none, so the summary shows the group's reported size.
+func writeGroupInvitePreview(flags *rootFlags, raw json.RawMessage) error {
+	if flags.asJSON {
+		return out.WriteJSON(os.Stdout, groupResultJSON(raw))
+	}
+	var info *types.GroupInfo
+	if err := decodeGroupResult(raw, &info); err != nil {
+		return err
+	}
+	if info == nil {
+		return fmt.Errorf("no group info in the result")
+	}
+	participants := info.ParticipantCount
+	if n := len(info.Participants); n > participants {
+		participants = n
+	}
+	writeGroupSummary(os.Stdout, info, participants)
+	if info.Topic != "" {
+		fmt.Fprintf(os.Stdout, "Description: %s\n", sanitize(info.Topic))
+	}
+	if info.IsJoinApprovalRequired {
+		fmt.Fprintln(os.Stdout, "Join approval: required")
+	}
+	return nil
 }
 
 func newGroupsInviteLinkRevokeCmd(flags *rootFlags) *cobra.Command {

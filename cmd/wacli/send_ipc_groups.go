@@ -6,7 +6,7 @@ import (
 	"fmt"
 )
 
-// Group kinds delegated to a same-store `sync --follow`, beside
+// Group and community kinds delegated to a same-store `sync --follow`, beside
 // the ones in send_ipc_manage.go. Every command has its own kind, so a sync
 // process that predates one rejects it before doing anything.
 const (
@@ -14,11 +14,21 @@ const (
 	groupTopicKind           = "group_topic"
 	groupAnnounceOnlyKind    = "group_announce_only"
 	groupLockedKind          = "group_locked"
+	groupJoinApprovalKind    = "group_join_approval"
+	groupMemberAddModeKind   = "group_member_add_mode"
+	groupPhotoSetKind        = "group_photo_set"
+	groupPhotoRemoveKind     = "group_photo_remove"
 	groupRequestsListKind    = "group_requests_list"
 	groupRequestsApproveKind = "group_requests_approve"
 	groupRequestsRejectKind  = "group_requests_reject"
 	groupInviteLinkGetKind   = "group_invite_link_get"
+	groupInviteInfoKind      = "group_invite_info"
 	groupsPruneKind          = "groups_prune"
+
+	communitySubgroupsKind    = "community_subgroups"
+	communityLinkKind         = "community_link"
+	communityUnlinkKind       = "community_unlink"
+	communityParticipantsKind = "community_participants"
 )
 
 type groupKindExecutor func(context.Context, waStoreApp, sendDelegateRequest) (sendDelegateResponse, error)
@@ -31,11 +41,21 @@ var groupKindExecutors = map[string]groupKindExecutor{
 	groupTopicKind:           executeGroupTopic,
 	groupAnnounceOnlyKind:    executeGroupToggle,
 	groupLockedKind:          executeGroupToggle,
+	groupJoinApprovalKind:    executeGroupToggle,
+	groupMemberAddModeKind:   executeGroupMemberAddMode,
+	groupPhotoSetKind:        executeGroupPhotoSet,
+	groupPhotoRemoveKind:     executeGroupPhotoRemove,
 	groupRequestsListKind:    executeGroupRequestsList,
 	groupRequestsApproveKind: executeGroupRequestsAction,
 	groupRequestsRejectKind:  executeGroupRequestsAction,
 	groupInviteLinkGetKind:   executeGroupInviteLinkGet,
+	groupInviteInfoKind:      executeGroupInviteInfo,
 	groupsPruneKind:          executeGroupsPrune,
+
+	communitySubgroupsKind:    executeCommunitySubgroups,
+	communityLinkKind:         executeCommunityLink,
+	communityUnlinkKind:       executeCommunityLink,
+	communityParticipantsKind: executeCommunityParticipants,
 }
 
 // executeDelegatedGroupKind runs one of the kinds above. ok is false for any

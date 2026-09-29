@@ -482,6 +482,53 @@ func (f *fakeWA) JoinGroupWithLink(ctx context.Context, code string) (types.JID,
 
 func (f *fakeWA) LeaveGroup(ctx context.Context, group types.JID) error { return nil }
 
+func (f *fakeWA) SetGroupPhoto(ctx context.Context, group types.JID, avatar []byte) (string, error) {
+	if avatar == nil {
+		return "remove", nil
+	}
+	return "fake-picture-id", nil
+}
+
+func (f *fakeWA) SetGroupJoinApprovalMode(ctx context.Context, group types.JID, on bool) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	g := f.groups[group]
+	if g == nil {
+		g = &types.GroupInfo{JID: group}
+		f.groups[group] = g
+	}
+	g.GroupMembershipApprovalMode.IsJoinApprovalRequired = on
+	return nil
+}
+
+func (f *fakeWA) SetGroupMemberAddMode(ctx context.Context, group types.JID, mode types.GroupMemberAddMode) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	g := f.groups[group]
+	if g == nil {
+		g = &types.GroupInfo{JID: group}
+		f.groups[group] = g
+	}
+	g.MemberAddMode = mode
+	return nil
+}
+
+func (f *fakeWA) GetGroupInfoFromLink(ctx context.Context, code string) (*types.GroupInfo, error) {
+	return nil, nil
+}
+
+func (f *fakeWA) GetSubGroups(ctx context.Context, community types.JID) ([]*types.GroupLinkTarget, error) {
+	return nil, nil
+}
+
+func (f *fakeWA) LinkGroup(ctx context.Context, parent, child types.JID) error { return nil }
+
+func (f *fakeWA) UnlinkGroup(ctx context.Context, parent, child types.JID) error { return nil }
+
+func (f *fakeWA) GetLinkedGroupsParticipants(ctx context.Context, community types.JID) ([]types.JID, error) {
+	return nil, nil
+}
+
 func (f *fakeWA) GetNewsletterInfoWithInvite(ctx context.Context, key string) (*types.NewsletterMetadata, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
