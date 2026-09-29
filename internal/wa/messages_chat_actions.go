@@ -208,7 +208,9 @@ func EventMessageText(ev *waE2E.EventMessage) string {
 }
 
 // SendEventMessage sends an event with the creation meta node WhatsApp's own
-// clients attach. whatsmeow still labels the stanza as a text message.
+// clients attach. The stanza must be typed "event"; the server rejects a
+// "text" one with error 479 (go.mod replaces whatsmeow with a build that sets
+// the type until upstream does).
 func (c *Client) SendEventMessage(ctx context.Context, to types.JID, msg *waProto.Message) (types.MessageID, error) {
 	c.mu.Lock()
 	cli := c.client
