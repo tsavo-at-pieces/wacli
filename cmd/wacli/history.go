@@ -143,38 +143,38 @@ func newHistoryBackfillCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 
-			ctx, stop := signalContextWithEvents(out.NewEventWriter(os.Stderr, flags.events))
+			// Like the bulk media commands, it runs until done unless
+			// --timeout is set explicitly.
+			ctx, stop := mediaBulkContext(cmd, flags)
 			defer stop()
 
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-
-			res, err := a.BackfillHistory(ctx, app.BackfillOptions{
+			opts := app.BackfillOptions{
 				ChatJID:        chat,
 				Count:          count,
 				Requests:       requests,
 				WaitPerRequest: wait,
 				IdleExit:       idleExit,
-			})
+			}
+			a, lk, err := newApp(ctx, flags, true, false)
+			if err != nil {
+				// A running `sync --follow` sends the requests over its own
+				// connection and streams the progress back.
+				req := sendDelegateRequest{Kind: historyBackfillKind, Chat: chat, Job: historyJobArgs(opts)}
+				return delegateJobAfterOpenFailure(ctx, flags, err, req, bulkJobBudget(mediaBulkTimeoutEnabled(cmd, flags), flags), func(resp sendDelegateResponse) error {
+					var res app.BackfillResult
+					if err := decodeDelegateJobResult(resp, &res); err != nil {
+						return err
+					}
+					return writeHistoryBackfillResult(flags, res)
+				})
+			}
+			defer closeApp(a, lk)
+
+			res, err := a.BackfillHistory(ctx, opts)
 			if err != nil {
 				return err
 			}
-
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{
-					"chat":            res.ChatJID,
-					"requests_sent":   res.RequestsSent,
-					"responses_seen":  res.ResponsesSeen,
-					"messages_added":  res.MessagesAdded,
-					"messages_synced": res.MessagesSynced,
-				})
-			}
-
-			fmt.Fprintf(os.Stdout, "Backfill complete for %s. Added %d messages (%d requests).\n", res.ChatJID, res.MessagesAdded, res.RequestsSent)
-			return nil
+			return writeHistoryBackfillResult(flags, res)
 		},
 	}
 

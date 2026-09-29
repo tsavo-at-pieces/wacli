@@ -109,6 +109,8 @@ type sendDelegateRequest struct {
 	PrivacySetting    string            `json:"privacy_setting,omitempty"`
 	PrivacyValue      string            `json:"privacy_value,omitempty"`
 	DisappearingTimer string            `json:"disappearing_timer,omitempty"`
+	// Job carries the options of the media and history job kinds.
+	Job *delegateJobArgs `json:"job,omitempty"`
 }
 
 type sendDelegateResponse struct {
@@ -138,13 +140,16 @@ type sendDelegateResponse struct {
 	Count        int             `json:"count,omitempty"`
 	DeletedMedia bool            `json:"deleted_media,omitempty"`
 	// Result carries a management kind's own result (group, status, channel or
-	// call), encoded from the same value the direct command prints with --json.
+	// call) or a media/history job's result, encoded from the same value the
+	// direct command prints with --json.
 	Result json.RawMessage `json:"result,omitempty"`
 	// Contacts carries contacts check results, as upstream's reply does.
 	Contacts []contactCheckResult `json:"contacts,omitempty"`
 	// Payload carries a profile, privacy or WhatsApp-contact result exactly
 	// as the direct command would print it with --json.
 	Payload json.RawMessage `json:"payload,omitempty"`
+	// Event marks a progress frame a job streams before its final response.
+	Event *delegateJobEvent `json:"event,omitempty"`
 }
 
 type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)
@@ -226,6 +231,10 @@ func startSendDelegateServerForStore(ctx context.Context, storeDir string, spaci
 		return nil, err
 	}
 
+	// Media and history jobs run beside the send slot, bounded by their own
+	// runner, which stop waits for before the store closes.
+	jobs := newDelegateJobRunner(delegateJobConcurrency)
+	ctx = withDelegateJobRunner(ctx, jobs)
 	done := make(chan struct{})
 	// One slot serializes delegated operations. Waiting for it is bounded by
 	// each caller's deadline, paced or not, so an operation still queued when
@@ -250,6 +259,7 @@ func startSendDelegateServerForStore(ctx context.Context, storeDir string, spaci
 	stop := func() {
 		_ = ln.Close()
 		<-done
+		jobs.wait(delegateJobShutdownWait)
 		_ = os.Remove(path)
 	}
 	return stop, nil
@@ -276,6 +286,11 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 	var req sendDelegateRequest
 	if err := json.NewDecoder(conn).Decode(&req); err != nil {
 		_ = json.NewEncoder(conn).Encode(sendDelegateResponse{OK: false, Error: err.Error()})
+		return
+	}
+	// Long media and history jobs must not hold the send slot (delegate_jobs.go).
+	if isDelegateJobKind(req.Kind) {
+		serveDelegateJob(ctx, conn, req, execute)
 		return
 	}
 
@@ -343,6 +358,10 @@ func handleSendDelegateConn(ctx context.Context, conn net.Conn, execute sendDele
 func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRequest) (sendDelegateResponse, error) {
 	if req.Version != sendDelegateVersion {
 		return sendDelegateResponse{}, fmt.Errorf("unsupported send delegate version %d", req.Version)
+	}
+	// Jobs carry their own budget, which may be unbounded (serveDelegateJob).
+	if isDelegateJobKind(req.Kind) {
+		return executeDelegatedJob(parent, a, req)
 	}
 	ctx, cancel := context.WithTimeout(parent, millisDuration(req.TimeoutMS, 5*time.Minute))
 	defer cancel()
