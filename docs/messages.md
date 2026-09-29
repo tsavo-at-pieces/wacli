@@ -2,7 +2,7 @@
 
 Read when: listing, searching, exporting, showing, inspecting local message context, or mutating stored messages.
 
-Most `wacli messages` commands read from the local store. `messages edit`, `messages delete`, `messages revoke`, and `messages forward` are remote WhatsApp mutations and require an authenticated, writable store.
+Most `wacli messages` commands read from the local store. `messages edit`, `messages delete`, `messages revoke`, `messages forward`, `messages star`/`unstar`, `messages pin`/`unpin`, and `messages keep`/`unkeep` are remote WhatsApp mutations and require an authenticated, writable store.
 WhatsApp status broadcasts are stored separately in `status_messages`; they are not returned by `messages list`, `messages search`, or `messages export`.
 
 ## Commands
@@ -19,6 +19,13 @@ wacli messages delete --chat JID --id MSG_ID [--for-me] [--delete-media] [--post
 wacli messages purge --chat JID --id MSG_ID [--dry-run] [--confirm]
 wacli messages revoke --chat JID --id MSG_ID [--post-send-wait 2s]
 wacli messages forward --chat JID --id MSG_ID --to RECIPIENT [--pick N] [--post-send-wait 2s]
+wacli messages star --chat JID --id MSG_ID
+wacli messages unstar --chat JID --id MSG_ID
+wacli messages pin --chat JID --id MSG_ID [--duration 24h|7d|30d] [--post-send-wait 2s]
+wacli messages unpin --chat JID --id MSG_ID [--post-send-wait 2s]
+wacli messages keep --chat JID --id MSG_ID [--post-send-wait 2s]
+wacli messages unkeep --chat JID --id MSG_ID [--post-send-wait 2s]
+wacli messages pinned [--chat JID]
 ```
 
 ## Search
@@ -58,6 +65,14 @@ Plain audio messages have an empty `MediaCaption`. Their `Text` keeps the `[Audi
 - `messages starred` lists starred messages ordered by star time when app-state events provide it; history-imported rows fall back to message time.
 - `--after` and `--before` on `messages starred` filter by that stored star time.
 - Starred state is imported from history sync and app-state star/unstar events.
+- `messages star` and `messages unstar` change the star on all your devices with WhatsApp's `star` app-state patch (`regular_high`) and update the local starred state that `messages starred` reads. The message must be stored locally and not deleted. For a group message someone else sent, the stored sender is required; in a LID-addressed group wacli names the sender by LID, as WhatsApp does.
+
+## Pin and keep
+
+- `messages pin` pins a stored message for everyone in the chat; `--duration` is `24h`, `7d` (default) or `30d`, the choices WhatsApp offers. `messages unpin` removes the pin. WhatsApp may refuse pins in groups where only admins can pin.
+- `messages pinned` lists current pins from the local store, newest first, with the pinned message when it is stored. Pins made on other devices arrive during sync and are recorded too; a pin without a known duration stays listed until it is unpinned.
+- `messages keep` keeps a message from disappearing in a chat with disappearing messages on; `messages unkeep` undoes it. WhatsApp ignores keep in chats without a timer; wacli cannot check the timer locally. See `chats disappearing`.
+- Pin and keep are protocol messages the other participants receive. Their notices are not stored as unread messages.
 
 ## Export
 
@@ -73,8 +88,8 @@ Plain audio messages have an empty `MediaCaption`. Their `Text` keeps the `[Audi
 - `messages delete --for-me` removes a stored message only for your WhatsApp account using WhatsApp's `deleteMessageForMe` app-state patch; it can target messages sent by you or by others. `--delete-media` is only valid with `--for-me`.
 - `messages forward` forwards a stored text, image, video, GIF, audio, sticker, or document message to another recipient and marks the outgoing copy as forwarded. Media forwards require synced media metadata; reaction forwarding is not supported.
 - These commands look up the target in the local store first and honor `--read-only`/`WACLI_READONLY`. Delete-for-everyone and edit require a message sent by you.
-- While a same-store `sync --follow` owns the store lock, `edit`, `delete` (including `--for-me` and `--delete-media`), `revoke`, and `forward` are delegated to it and print the same output as a direct run. The follow process cannot prompt, so an ambiguous `forward --to` name needs `--pick N`, as with `--json`. Restart an older sync process after upgrading; it rejects a command it predates without running it.
-- Deleted messages and WhatsApp delete-for-me events are kept as local tombstones with `deleted_at` and `deletion_reason`. Their original text, reply, interactive, and media metadata remains available to direct `messages show`, but tombstones stay hidden from normal list/search/starred/export results and FTS.
+- While a same-store `sync --follow` owns the store lock, `edit`, `delete` (including `--for-me` and `--delete-media`), `revoke`, `forward`, `star`, `unstar`, `pin`, `unpin`, `keep`, and `unkeep` are delegated to it and print the same output as a direct run. The follow process cannot prompt, so an ambiguous `forward --to` name needs `--pick N`, as with `--json`. Restart an older sync process after upgrading; it rejects a command it predates without running it.
+- Deleted messages, WhatsApp delete-for-me events, and messages removed by deleting or clearing a whole chat (`chats delete`/`chats clear`, or the same on another device; `deletion_reason` `whatsapp-delete-chat` or `whatsapp-clear-chat`) are kept as local tombstones with `deleted_at` and `deletion_reason`. Their original text, reply, interactive, and media metadata remains available to direct `messages show`, but tombstones stay hidden from normal list/search/starred/export results and FTS.
 - Sync, history, and backfill ingestion merge messages by chat JID and message ID. A message missing from any partial import is left unchanged, and a later live copy does not resurrect an existing tombstone.
 - `messages purge` is the deliberate payload-erasure path. It only accepts an already tombstoned row, removes downloaded local media, clears its retained `wacli.db` payload, and requires confirmation unless `--confirm` is passed. A minimal tombstone with `payload_purged_at` and a non-cascading purge-ledger key remain so later sync or history imports cannot restore the payload after chat cleanup.
 

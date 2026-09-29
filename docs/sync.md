@@ -35,15 +35,16 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-t
 - If neither storage cap is configured, sync prints one warning because WhatsApp history can grow the local database substantially.
 - `WACLI_SYNC_MAX_MESSAGES` and `WACLI_SYNC_MAX_DB_SIZE` apply the same caps to `auth` bootstrap sync and `sync`.
 - After `sync --follow` finishes startup and opens its local delegate socket, these commands for the same store are delegated to it so they do not fail on the store lock:
-  - `send text`, `send file`, `send sticker`, `send voice`, `send react`, `send location`, `send poll`, and `send select`.
+  - `send text`, `send file` (including `--view-once`), `send sticker`, `send voice` (including `--view-once`), `send react`, `send location`, `send poll`, `send select`, `send contact`, and `send event`.
   - `poll vote`, `presence typing`, `presence paused`, and `messages edit`.
-  - `chats mark-read`, `chats mark-unread`, `chats archive`, `chats unarchive`, `chats pin`, `chats unpin`, `chats mute`, and `chats unmute`.
+  - `chats mark-read`, `chats mark-unread`, `chats archive`, `chats unarchive`, `chats pin`, `chats unpin`, `chats mute`, `chats unmute`, `chats delete`, `chats clear`, `chats lock`, `chats unlock`, `chats disappearing`, `chats favorite`, and `chats unfavorite`.
+  - `chats lists create`, `chats lists rename`, `chats lists delete`, `chats lists add`, and `chats lists remove`.
   - `groups create`, `groups info`, `groups rename`, `groups topic`, `groups description`, `groups announce-only`, `groups locked`, `groups join-approval`, `groups member-add-mode`, `groups photo set|remove`, `groups leave`, `groups join`, `groups refresh`, `groups invite link get|revoke`, `groups invite info`, `groups participants add|remove|promote|demote`, `groups requests list|approve|reject`, `groups prune` (the deletion; `--dry-run` reads without the lock), and `groups community subgroups|participants|link|unlink`.
   - `contacts alias set|rm`, `contacts tags add|rm`, and `contacts refresh`.
   - `contacts check`, `contacts import-system` (without `--dry-run`, including `--clear`), `contacts save`, `contacts delete`, `contacts block`, `contacts unblock`, and `contacts blocklist`.
   - `profile set-name`, `profile set-about`, `profile set-picture`, `profile remove-picture`, `profile picture-info`, `profile get-about`, and `profile business`.
   - `privacy show`, `privacy set`, `privacy disappearing-default`, and `privacy status`.
-  - `messages delete` (including `--for-me` and `--delete-media`), `messages revoke`, and `messages forward`.
+  - `messages delete` (including `--for-me` and `--delete-media`), `messages revoke`, `messages forward`, `messages star`, `messages unstar`, `messages pin`, `messages unpin`, `messages keep`, and `messages unkeep`.
   - `send status`, `status mute`, `status unmute`, and `status privacy`.
   - `channels list`, `channels info`, `channels join`, `channels leave`, `channels mute`, `channels unmute`, `channels messages`, `channels react`, `channels mark-viewed`, and `channels create`.
   - `calls reject`.
@@ -55,6 +56,7 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-t
 - Commands that only prune the local store (`chats cleanup`, `messages purge`, `store cleanup`) and `auth` still need the store lock.
 - Sync mirrors WhatsApp contacts saved or renamed on any linked device into the local contacts table, and applies block and unblock notifications to the local copy of the block list (see [contacts](contacts.md)).
 - After connecting, sync fetches WhatsApp chat app-state deltas (`regular_high` and `regular_low`) so starred, delete-for-me, mute, archive, pin, mark-read, and status mute changes made while `wacli` was offline are caught up instead of relying only on live push notifications. Status mutes are mirrored into the `status_mutes` table; see [status](status.md).
+- Sync also mirrors chats deleted or cleared on another device (their messages become local tombstones, see [chats](chats.md#delete-and-clear)), chat locks, WhatsApp lists and their chats, favorites, and pinned messages. The `regular` collection, which holds lists, is fully re-read at every sync start; locks, favorites, and older deletions in `regular_low`/`regular_high` arrive as they change or with the next full replay of those collections.
 - Sync imports messages sent from your other linked devices into the destination chat with `from_me=true`, so local history covers both incoming and outgoing conversation sides.
 - Sync decrypts encrypted message edits and updates the original local row only when the authenticated sender, chat, and target message match. Malformed, redirected, or unsupported edits are rejected without changing local history or emitting a message webhook.
 - If whatsmeow reports an app-state LTHash mismatch, sync attempts one full refresh for that collection before requesting a phone snapshot. Recovery uses a durable intent and ordered local persistence; interrupted work is replayed at the next startup before incremental fetches. Full refresh and phone recovery have independent timeouts, and each collection gets at most one automatic recovery sequence per sync run. Failed recovery retains its intent and emits a warning while normal message/history handling continues.

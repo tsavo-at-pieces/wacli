@@ -1,6 +1,6 @@
 # send
 
-Read when: sending text, files, stickers, locations, polls, status broadcasts, quoted replies, or reactions.
+Read when: sending text, files, stickers, locations, polls, contact cards, events, view-once media, status broadcasts, quoted replies, or reactions.
 
 `wacli send` requires authentication, a live connection, and writable mode. Send attempts are bounded and retry once after reconnect for known stale-session/usync timeout failures. `Sent to ...` and JSON `sent: true` mean WhatsApp accepted the send request and returned a message ID; they do not confirm recipient delivery. After a successful send, wacli keeps the connection alive briefly so whatsmeow can handle retry receipts from devices that could not decrypt the first copy. Repeated send commands within 5 seconds print a stderr warning so tight loops make WhatsApp rate-limit/account-risk visible.
 
@@ -10,9 +10,11 @@ When `sync --follow` is already running for the same store, send commands delega
 
 ```bash
 wacli send text --to RECIPIENT --message TEXT [--message-escapes] [--pick N] [--mention USER] [--no-preview] [--allow-self] [--ephemeral] [--ephemeral-duration DURATION] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
-wacli send file --to RECIPIENT --file PATH [--pick N] [--caption TEXT] [--filename NAME] [--mime TYPE] [--as auto|document|audio|image|video] [--ptt] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
+wacli send file --to RECIPIENT --file PATH [--pick N] [--caption TEXT] [--filename NAME] [--mime TYPE] [--as auto|document|audio|image|video] [--ptt] [--view-once] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
 wacli send sticker --to RECIPIENT --file PATH [--pick N] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
-wacli send voice --to RECIPIENT --file PATH [--pick N] [--mime TYPE] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
+wacli send voice --to RECIPIENT --file PATH [--pick N] [--mime TYPE] [--view-once] [--reply-to MSG_ID] [--reply-to-sender JID] [--post-send-wait 2s]
+wacli send contact --to RECIPIENT --contact JID|PHONE|NAME [--contact ...] [--name NAME] [--pick N] [--post-send-wait 2s]
+wacli send event --to GROUP --name TEXT --start RFC3339 [--end RFC3339] [--description TEXT] [--location TEXT] [--join-link URL] [--pick N] [--post-send-wait 2s]
 wacli send location --to RECIPIENT --latitude LAT --longitude LNG [--name TEXT] [--pick N] [--post-send-wait 2s]
 wacli send react --to PHONE_OR_JID --id MSG_ID [--reaction TEXT] [--sender JID] [--post-send-wait 2s]
 wacli send poll --to RECIPIENT --question TEXT --option TEXT --option TEXT [--multi N] [--ephemeral] [--post-send-wait 2s]
@@ -114,6 +116,30 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 - When available, `ffprobe` sets voice-note duration and `ffmpeg` generates the 64-sample waveform from decoded PCM audio.
 - Waveform decoding is capped at 2 MiB (about 131 seconds). Longer voice notes use that initial segment for the waveform; the complete audio file and its full duration are still sent. Failed decodes omit the optional waveform.
 
+## Contact cards
+
+- `send contact` shares a vCard for each `--contact`. One contact is sent as a single card; repeat `--contact` to send several as one contacts message.
+- `--contact` accepts a JID, a phone number, or a synced contact name. A `@lid` contact is resolved to its phone number; a contact without a known phone number, or a group, is refused.
+- The card name is `--name` (only with a single `--contact`), else the contact's alias, name, or system name from the local store, else `+PHONE`.
+- Each card carries the number with its WhatsApp ID (`TEL;waid=...`), as WhatsApp's own apps do, so recipients get a Message button.
+- The sent message is stored locally with the same `Contact: NAME (+PHONE)` text sync stores for a received card.
+
+## Events
+
+- `send event` creates a WhatsApp event invitation. `--name` and `--start` (RFC3339) are required; `--end` must be after `--start`.
+- Events are meant for groups; one-to-one chats are accepted where WhatsApp supports them. Channels and status are refused.
+- `--location` is free text. `--join-link` attaches an existing WhatsApp call link (`https://call.whatsapp.com/...`). wacli cannot create call links: whatsmeow has no call-link API, so make the link on the phone and pass it.
+- The event carries a fresh 32-byte message secret, which WhatsApp uses to encrypt RSVPs. wacli does not record RSVPs (going / not going); see responses on the phone.
+- whatsmeow sends the event with the `event_type=creation` meta node WhatsApp's clients use, but labels the stanza as a text message; if an event does not render on a recipient's phone, that is the likely cause.
+- The sent event is stored locally as searchable text (`Event: NAME`, times, location, description). Events received from other devices are stored the same way.
+
+## View once
+
+- `send file --view-once` sends an image or video as view once; `send voice --view-once` (or `send file --ptt --view-once`) sends a view-once voice note. WhatsApp offers view once only for these, so documents, stickers, plain audio, channels, and status are refused before anything is uploaded.
+- Images and videos go out in WhatsApp's `viewOnceMessageV2` wrapper and voice notes in `viewOnceMessageV2Extension`, with the media's own `viewOnce` flag set.
+- JSON output adds `"view_once": "true"` to the `file` object.
+- View-once sends use their own delegate kinds (`file_view_once`, `voice_view_once`), so a `sync --follow` started before this feature refuses them instead of sending an ordinary, re-viewable file. Restart sync after upgrading.
+
 ## Examples
 
 ```bash
@@ -129,6 +155,9 @@ wacli send file --to 1234567890 --file ./pic.jpg --caption "hi"
 wacli send file --to 1234567890 --file /tmp/report --filename report.pdf
 wacli send sticker --to 1234567890 --file ./sticker-512.webp
 wacli send voice --to 1234567890 --file ./voice.ogg
+wacli send file --to "+1 202 555 0142" --file ./pic.jpg --view-once
+wacli send contact --to "Family" --contact "+1 202 555 0142" --name "Test Person"
+wacli send event --to "Family" --name "Dinner" --start 2026-10-01T18:00:00Z --end 2026-10-01T20:00:00Z --location "Test place"
 wacli send location --to 1234567890 --latitude 51.4779 --longitude -0.0015 --name "Royal Observatory"
 wacli send react --to 1234567890 --id ABC123 --reaction "❤️"
 wacli send poll --to "Family" --question "Dinner?" --option "Pizza" --option "Sushi" --multi 1
