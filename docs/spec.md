@@ -21,7 +21,7 @@ Each store owns two databases: `session.db` contains whatsmeow-managed identitie
 
 The WhatsApp wrapper owns its session database container. Temporary `Disconnect` calls stop the socket while retaining the container for reconnects; permanent `Close` releases it. Application shutdown disconnects first, drains app-state persistence, and then closes both databases. Failed client initialization also releases any container it opened.
 
-The other store files include downloaded `media/`, an exclusive-writer `LOCK`, and the follow process's `HEARTBEAT`. The heartbeat records observed activity at most once per minute; it is not a process-liveness or keepalive-health signal. Files containing account state use owner-only permissions.
+The other store files include downloaded `media/`, an exclusive-writer `LOCK`, the follow process's `HEARTBEAT`, and, once `media transcribe` has stored something, the `transcripts.db` sidecar. The sidecar holds machine transcripts apart from `wacli.db` so transcription never needs the lock or writes the message mirror. The heartbeat records observed activity at most once per minute; it is not a process-liveness or keepalive-health signal. Files containing account state use owner-only permissions.
 
 Store selection and the supported legacy Linux directory fallback are documented in [accounts](accounts.md). Local row removal, retention, and statistics are documented in [store](store.md).
 

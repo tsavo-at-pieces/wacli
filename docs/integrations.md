@@ -27,6 +27,8 @@ The store contains two SQLite databases:
 - `session.db`: owned by `whatsmeow`; contains linked-device identity and keys.
 - `wacli.db`: owned by `wacli`; contains chats, contacts, groups, messages, status broadcasts, call events, media metadata, and local state.
 
+An optional third database, `transcripts.db`, holds voice-note transcripts written by `wacli media transcribe` (see [media](media.md#transcribe)). It is keyed by `(chat_jid, msg_id)` with the canonical phone-number chat JID. Read it the same read-only way.
+
 Companion tools should not read or write `session.db` unless they are explicitly working on WhatsApp session internals. Never write to `wacli.db` from a companion tool.
 
 For multi-account tools, iterate configured accounts explicitly and annotate derived rows with the account name in the companion tool's own database. Do not merge account data into `wacli.db`.

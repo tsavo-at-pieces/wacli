@@ -36,6 +36,23 @@ wacli messages forward --chat JID --id MSG_ID --to RECIPIENT [--pick N] [--post-
 
 Plain audio messages have an empty `MediaCaption`. Their `Text` keeps the `[Audio]` display fallback, so they can still match searches for `Audio`. Text supplied alongside an audio payload remains its caption, including a literal `[Audio]` supplied by the sender. Existing rows are not migrated; an ordinary live or history re-ingestion can replace a legacy synthetic caption, subject to the existing edit and deletion rules.
 
+## Voice note transcripts
+
+`wacli media transcribe` stores speech-to-text for audio messages in a sidecar `transcripts.db` (see [media](media.md#transcribe)). When an audio message has a transcript:
+
+- `messages list`, `show`, `context`, `search`, `starred`, and `export` add `transcript` (the text) and `transcript_engine` (for example `fluidaudio`) to the message JSON. Both fields are omitted when there is no transcript. `"transcript": ""` means the engine heard no speech.
+- Human tables show `[Voice] <transcript>` in place of the `Sent audio` placeholder (a reply keeps its quoted line), and `messages show` adds `Transcribed by: <engine>`.
+- `Text`, `DisplayText`, and every other stored field are unchanged. A transcript is never written into typed-text columns.
+- If `transcripts.db` does not exist, output is exactly as before and read commands do not create it.
+
+`messages search <query>` also matches transcripts:
+
+- A transcript matches when it contains every word of the query, compared case-insensitively (ASCII case folding, like the `LIKE` fallback). Wildcards are literal.
+- Transcript matches honor the same filters as regular results: `--chat` (including mapped `@lid` rows), `--from`, `--after`/`--before`, `--has-media`, `--forwarded`, `--starred`, and `--type`. Any `--type` other than `audio` excludes them.
+- Their `Snippet` looks like the FTS snippet with a `[Voice]` prefix, for example `[Voice] bring the [picnic] blanket`.
+- A message found by both its own text and its transcript appears once.
+- When transcript matches are added, the combined list is ordered newest first and cut to `--limit`. FTS relevance scores and transcript matches cannot be compared, so time is the one shared order. When no transcript matches, results keep their usual order (FTS rank, or newest first for `LIKE`).
+
 ## Starred
 
 - `messages starred` lists starred messages ordered by star time when app-state events provide it; history-imported rows fall back to message time.

@@ -18,6 +18,7 @@ Read when: you need the user-facing command map, global flags, store model, or l
 - Write commands acquire the store lock; use `--lock-wait DURATION` to wait.
 - Use `--read-only` or `WACLI_READONLY=1` to reject commands that write WhatsApp or local state.
 - Use `WACLI_MEDIA_ROOTS` to confine which local files send commands may upload (see [send](send.md#files)).
+- Use `WACLI_TRANSCRIBE_ENGINE`, `WACLI_TRANSCRIBE_MODEL`, `WACLI_TRANSCRIBE_LANGUAGE`, `WACLI_TRANSCRIBE_COMMAND`, `WACLI_TRANSCRIBE_TIMEOUT`, `WACLI_FFMPEG`, and the engine binary variables (`WACLI_FLUIDAUDIO`, `WACLI_NEMO_SPEECH`, `WACLI_PARAKEET_CLI`, `WACLI_WHISPER_CLI`) to configure local voice-note transcription (see [media](media.md#transcribe)). `media transcribe` takes no store lock, runs alongside `sync --follow`, and is allowed in read-only mode because it writes only `transcripts.db`.
 - Use `sync --max-messages`, `sync --max-db-size`, `WACLI_SYNC_MAX_MESSAGES`, or `WACLI_SYNC_MAX_DB_SIZE` to bound local history growth.
 - Use `store cleanup`, `chats cleanup`, and `groups prune` to preview and remove stale local rows after sync has already stored them.
 - Authenticated startup resolves historical `@lid` chat/message rows to phone-number JIDs when the WhatsApp session store has the mapping.
@@ -31,7 +32,7 @@ Read when: you need the user-facing command map, global flags, store model, or l
 - [messages](messages.md) - list, search, show, and contextualize stored messages.
 - [calls](calls.md) - list stored WhatsApp call events.
 - [send](send.md) - send text, files, stickers, statuses, replies, and reactions.
-- [media](media.md) - download media attached to stored messages.
+- [media](media.md) - download media attached to stored messages and transcribe voice notes locally.
 - [contacts](contacts.md) - search contacts and manage local aliases/tags.
 - [contacts import-system](contacts-import-system.md) - import macOS Contacts names into local contact metadata.
 - [chats](chats.md) - list, show, filter, and manage known chat state.
