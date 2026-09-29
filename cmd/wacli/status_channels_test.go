@@ -234,8 +234,8 @@ func (d *statusChannelsDaemon) received() []sendDelegateRequest {
 	return slices.Clone(d.requests)
 }
 
-// writeTestPNG writes a tiny fictional image for status uploads.
-func writeTestPNG(t *testing.T, dir string) string {
+// writeStatusTestPNG writes a tiny fictional image for status uploads.
+func writeStatusTestPNG(t *testing.T, dir string) string {
 	t.Helper()
 	img := image.NewRGBA(image.Rect(0, 0, 2, 2))
 	img.Set(0, 0, color.RGBA{R: 200, A: 255})
@@ -411,11 +411,11 @@ func statusChannelsCases() []statusChannelsCase {
 			args:  fixedArgs("status", "privacy"),
 			calls: []string{"status-privacy"},
 			direct: func(ctx context.Context, a *fakeStatusChannelsApp, flags *rootFlags, _ string) error {
-				rows, err := fetchStatusPrivacy(ctx, a)
+				rows, err := fetchStatusAudience(ctx, a)
 				if err != nil {
 					return err
 				}
-				return writeStatusPrivacy(flags, rows)
+				return writeStatusAudience(flags, rows)
 			},
 			json: `{"success":true,"data":{"privacy":[{"type":"blacklist","default":true,"list":["15550000002@s.whatsapp.net"]},{"type":"whitelist","default":false,"list":["100000000003@lid"]}]},"error":null}` + "\n",
 		},
@@ -666,7 +666,7 @@ func TestStatusChannelsCallsDelegateToFollowProcess(t *testing.T) {
 			}
 			t.Run(tc.name+"/"+mode, func(t *testing.T) {
 				dir := t.TempDir()
-				writeTestPNG(t, dir)
+				writeStatusTestPNG(t, dir)
 				d := startStatusChannelsDaemon(t, tc.seed)
 				global := []string{"--store", d.storeDir, "--timeout", "5s"}
 				if asJSON {
@@ -755,7 +755,7 @@ func TestStatusChannelsCallsExplainOlderFollowProcessRejection(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			skipPresenceDelegateSocketTestOnUnsupportedOS(t)
 			dir := t.TempDir()
-			writeTestPNG(t, dir)
+			writeStatusTestPNG(t, dir)
 			storeDir := shortPresenceDelegateStoreDir(t)
 			lk, err := lock.Acquire(storeDir)
 			if err != nil {
@@ -794,7 +794,7 @@ func TestStatusChannelsCallsHonorReadOnlyBeforeDelegating(t *testing.T) {
 			}
 			t.Run(name, func(t *testing.T) {
 				dir := t.TempDir()
-				writeTestPNG(t, dir)
+				writeStatusTestPNG(t, dir)
 				d := startStatusChannelsDaemon(t, tc.seed)
 				args := []string{"--store", d.storeDir, "--timeout", "5s"}
 				if viaEnv {

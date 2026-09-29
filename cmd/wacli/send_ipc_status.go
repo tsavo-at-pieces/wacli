@@ -58,7 +58,7 @@ func executeDelegatedStatusChannelsCalls(ctx context.Context, m delegatedManagem
 		}
 		return sendDelegateResponse{OK: true, Chat: res.JID}, nil
 	case statusPrivacyKind:
-		rows, err := fetchStatusPrivacy(ctx, a)
+		rows, err := fetchStatusAudience(ctx, a)
 		return delegatedResult(rows, err)
 	case channelsListKind:
 		rows, err := listChannels(ctx, a)

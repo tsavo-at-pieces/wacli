@@ -42,14 +42,3 @@ func (c *Client) MuteUserStatus(ctx context.Context, target types.JID, mute bool
 	}
 	return c.sendAppStateWithBoundary(ctx, buildUserStatusMutePatch(target, mute), beforeApply)
 }
-
-// GetStatusPrivacy returns who receives this account's status updates.
-func (c *Client) GetStatusPrivacy(ctx context.Context) ([]types.StatusPrivacy, error) {
-	c.mu.Lock()
-	cli := c.client
-	c.mu.Unlock()
-	if cli == nil || !cli.IsConnected() {
-		return nil, fmt.Errorf("not connected")
-	}
-	return cli.GetStatusPrivacy(ctx)
-}

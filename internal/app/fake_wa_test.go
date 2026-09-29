@@ -993,7 +993,3 @@ func (f *fakeWA) SetPrivacySetting(ctx context.Context, name types.PrivacySettin
 func (f *fakeWA) SetDefaultDisappearingTimer(ctx context.Context, timer time.Duration) error {
 	return nil
 }
-
-func (f *fakeWA) GetStatusPrivacy(ctx context.Context) ([]types.StatusPrivacy, error) {
-	return nil, nil
-}

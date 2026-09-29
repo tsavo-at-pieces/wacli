@@ -550,7 +550,7 @@ func newStatusPrivacyCmd(flags *rootFlags) *cobra.Command {
 					if err := decodeDelegatedResult(resp, &rows); err != nil {
 						return err
 					}
-					return writeStatusPrivacy(flags, rows)
+					return writeStatusAudience(flags, rows)
 				})
 			}
 			defer closeApp(a, lk)
@@ -561,11 +561,11 @@ func newStatusPrivacyCmd(flags *rootFlags) *cobra.Command {
 			if err := a.Connect(ctx, false, nil); err != nil {
 				return err
 			}
-			rows, err := fetchStatusPrivacy(ctx, a)
+			rows, err := fetchStatusAudience(ctx, a)
 			if err != nil {
 				return err
 			}
-			return writeStatusPrivacy(flags, rows)
+			return writeStatusAudience(flags, rows)
 		},
 	}
 }
@@ -578,7 +578,7 @@ type statusPrivacyRecord struct {
 	List    []string `json:"list,omitempty"`
 }
 
-func fetchStatusPrivacy(ctx context.Context, a waStoreApp) ([]statusPrivacyRecord, error) {
+func fetchStatusAudience(ctx context.Context, a waStoreApp) ([]statusPrivacyRecord, error) {
 	lists, err := a.WA().GetStatusPrivacy(ctx)
 	if err != nil {
 		return nil, err
@@ -594,7 +594,7 @@ func fetchStatusPrivacy(ctx context.Context, a waStoreApp) ([]statusPrivacyRecor
 	return rows, nil
 }
 
-func writeStatusPrivacy(flags *rootFlags, rows []statusPrivacyRecord) error {
+func writeStatusAudience(flags *rootFlags, rows []statusPrivacyRecord) error {
 	if rows == nil {
 		rows = []statusPrivacyRecord{}
 	}
