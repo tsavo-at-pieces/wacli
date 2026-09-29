@@ -76,3 +76,22 @@ func WritePrivateFileAtomic(path string, data []byte) error {
 	keepTemp = false
 	return nil
 }
+
+// EnsurePrivateFile creates path as an empty owner-only file when it does not
+// exist, and narrows an existing file to 0600. It never truncates, so it is
+// safe to call on a live SQLite database before opening it.
+func EnsurePrivateFile(path string) error {
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0o600)
+	if err != nil {
+		return fmt.Errorf("open private file: %w", err)
+	}
+	chmodErr := f.Chmod(0o600)
+	closeErr := f.Close()
+	if chmodErr != nil {
+		return fmt.Errorf("chmod private file: %w", chmodErr)
+	}
+	if closeErr != nil {
+		return fmt.Errorf("close private file: %w", closeErr)
+	}
+	return nil
+}

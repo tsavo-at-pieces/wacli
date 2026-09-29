@@ -186,3 +186,41 @@ func TestEnsureWritableDirRejectsNonWritableDir(t *testing.T) {
 		t.Fatalf("expected error for non-writable dir")
 	}
 }
+
+func TestEnsurePrivateFileCreatesWithoutTruncating(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "file")
+	if err := EnsurePrivateFile(path); err != nil {
+		t.Fatalf("EnsurePrivateFile create: %v", err)
+	}
+	info, err := os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 || info.Size() != 0 {
+		t.Fatalf("mode = %04o size = %d, want 0600 and empty", got, info.Size())
+	}
+
+	if err := os.WriteFile(path, []byte("keep"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := os.Chmod(path, 0o644); err != nil {
+		t.Fatalf("Chmod setup: %v", err)
+	}
+	if err := EnsurePrivateFile(path); err != nil {
+		t.Fatalf("EnsurePrivateFile existing: %v", err)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile: %v", err)
+	}
+	if string(data) != "keep" {
+		t.Fatalf("data = %q, want existing content kept", data)
+	}
+	info, err = os.Stat(path)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if got := info.Mode().Perm(); got != 0o600 {
+		t.Fatalf("mode = %04o, want 0600", got)
+	}
+}
