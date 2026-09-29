@@ -74,7 +74,7 @@ wacli --read-only --json messages search "invoice"
 WACLI_READONLY=1 wacli --json doctor
 ```
 
-Write commands take a per-store lock. After a `sync --follow` process finishes startup, supported send, chat-state, group, contact-metadata, and message-management commands are delegated to it while it owns that lock (see [sync](docs/sync.md)). See [companion integrations](docs/integrations.md) for webhooks and safe read-only SQLite access.
+Write commands take a per-store lock. After a `sync --follow` process finishes startup, supported send, chat-state, group, contact, profile, privacy, and message-management commands are delegated to it while it owns that lock (see [sync](docs/sync.md)). See [companion integrations](docs/integrations.md) for webhooks and safe read-only SQLite access.
 
 ## Commands
 
@@ -84,9 +84,9 @@ Write commands take a per-store lock. After a `sync --follow` process finishes s
 | [`sync`](docs/sync.md), [`history`](docs/history.md) | Mirror new events and request older per-chat history. |
 | [`messages`](docs/messages.md), [`calls`](docs/calls.md), [`status`](docs/status.md) | Search, inspect, export, and manage local records. |
 | [`send`](docs/send.md), [`media`](docs/media.md) | Send text and files or download synced media. |
-| [`contacts`](docs/contacts.md), [`chats`](docs/chats.md) | Find people and manage local or remote chat state. |
+| [`contacts`](docs/contacts.md), [`chats`](docs/chats.md) | Find, save, and block people; manage local or remote chat state. |
 | [`groups`](docs/groups.md), [`channels`](docs/channels.md) | Inspect and manage groups, communities, and channels. |
-| [`profile`](docs/profile.md), [`presence`](docs/presence.md) | Manage profile details and chat presence. |
+| [`profile`](docs/profile.md), [`privacy`](docs/privacy.md), [`presence`](docs/presence.md) | Manage profile details, privacy settings, and chat presence. |
 | [`store`](docs/store.md), [`doctor`](docs/doctor.md) | Inspect local storage and diagnose the setup. |
 
 The complete documentation is at [wacli.sh](https://wacli.sh), or run `wacli help <command>` for the installed command reference.

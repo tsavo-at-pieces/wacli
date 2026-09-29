@@ -24,6 +24,7 @@ A script-friendly WhatsApp CLI built on [`whatsmeow`](https://github.com/tulir/w
 - **Using multiple WhatsApp accounts.** Read [Accounts](accounts.md) for named account stores and `--account`.
 - **Searching old chats.** Read [Sync](sync.md) for the sync model and [History](history.md) for coverage planning and on-demand backfill.
 - **Managing chat state.** Read [Chats](chats.md) for archive, pin, mute, and read/unread commands.
+- **Managing contacts and privacy.** Read [Contacts](contacts.md) to save, delete, and block WhatsApp contacts, and [Privacy](privacy.md) for privacy settings.
 - **Managing local storage.** Read [Store](store.md) for stats, dry-run cleanup, and local-only pruning.
 - **Sending from scripts.** Read [Send](send.md) for recipient resolution, channels, status broadcasts, replies, mentions, files, and reactions.
 - **Mirroring address-book names.** Read [Contacts import-system](contacts-import-system.md) to import macOS Contacts display names into local wacli metadata.
@@ -39,7 +40,6 @@ Core implementation is in place. The [CHANGELOG](https://github.com/openclaw/wac
 
 - Guaranteed full-history export (WhatsApp Web history is best-effort).
 - A daemon, MCP server, web UI, or GUI.
-- End-to-end "contact creation" inside WhatsApp; local aliases and tags only.
 
 ## Disclaimer
 

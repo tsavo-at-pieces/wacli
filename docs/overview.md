@@ -34,7 +34,7 @@ Read when: you need the user-facing command map, global flags, store model, or l
 - [status](status.md) - read and download synced status updates, mute a contact's status, and show status privacy.
 - [send](send.md) - send text, files, stickers, statuses, replies, and reactions.
 - [media](media.md) - download media attached to stored messages and transcribe voice notes locally.
-- [contacts](contacts.md) - search contacts and manage local aliases/tags.
+- [contacts](contacts.md) - search contacts, manage local aliases/tags, save or delete WhatsApp contacts, and block users.
 - [contacts import-system](contacts-import-system.md) - import macOS Contacts names into local contact metadata.
 - [chats](chats.md) - list, show, filter, and manage known chat state.
 - [groups](groups.md) - refresh, inspect, rename, leave, join, invite, and manage participants.
@@ -43,6 +43,7 @@ Read when: you need the user-facing command map, global flags, store model, or l
 - [history](history.md) - inspect archive coverage and request older per-chat history from the primary device.
 - [presence](presence.md) - send typing/paused indicators.
 - [profile](profile.md) - manage profile picture, About text, display name, and fetch profile metadata.
+- [privacy](privacy.md) - show and change privacy settings, the default disappearing timer, and status audience.
 - [doctor](doctor.md) - diagnose store, auth, search, and optional live connectivity.
 - [docs](docs.md) - print the hosted documentation URL.
 - [version](version.md) - print the CLI version.

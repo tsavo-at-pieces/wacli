@@ -1,8 +1,8 @@
 # contacts
 
-Read when: finding synced contacts, importing macOS Contacts names, or managing local contact metadata.
+Read when: finding synced contacts, importing macOS Contacts names, managing local contact metadata, saving or deleting WhatsApp contacts, or blocking users.
 
-`wacli contacts` works with contact metadata stored locally. Aliases and tags are local to `wacli`; they do not edit WhatsApp contacts on the phone.
+`wacli contacts` works with contact metadata stored locally and with the account's WhatsApp contacts. Aliases, tags and imported system names are local to `wacli`; they do not edit WhatsApp contacts on the phone. `save`, `delete`, `block` and `unblock` change the account on WhatsApp itself.
 
 ## Commands
 
@@ -17,6 +17,11 @@ wacli contacts alias set --jid JID --alias NAME
 wacli contacts alias rm --jid JID
 wacli contacts tags add --jid JID --tag TAG
 wacli contacts tags rm --jid JID --tag TAG
+wacli contacts save (--jid JID | --phone PHONE) [--first-name NAME] [--full-name NAME] [--save-to-phone]
+wacli contacts delete --jid JID
+wacli contacts block --jid JID
+wacli contacts unblock --jid JID
+wacli contacts blocklist
 ```
 
 ## Notes
@@ -36,7 +41,22 @@ wacli contacts tags rm --jid JID --tag TAG
 - Use `import-system --dry-run` before writing. Use `import-system --clear` to remove imported system names.
 - See [contacts import-system](contacts-import-system.md) for the full import workflow, JSON shape, file format, and verification steps.
 - Tags are local grouping metadata for scripts and future workflows.
-- While a same-store `sync --follow` owns the store lock, `alias set|rm`, `tags add|rm`, and `refresh` are delegated to it. It writes with its own open store and resolves identities from the same session mapping, still without contacting WhatsApp, and the command prints the same output as a direct run. `import-system` still needs the lock. Restart an older sync process after upgrading; it rejects a command it predates without running it.
+- While a same-store `sync --follow` owns the store lock, `alias set|rm`, `tags add|rm`, and `refresh` are delegated to it. It writes with its own open store and resolves identities from the same session mapping, still without contacting WhatsApp, and the command prints the same output as a direct run. Restart an older sync process after upgrading; it rejects a command it predates without running it.
+- `check`, `import-system` (writes and `--clear`), `save`, `delete`, `block`, `unblock`, and `blocklist` are delegated the same way, so they work while `sync --follow` runs. `check` runs on the sync process's connected session and uses the same request kind (`contacts_check`) and fields as upstream wacli. `import-system` reads macOS Contacts or `--input` in the invoking process and hands the sync process only the phone-to-name map; `--dry-run` never takes the lock and runs directly. Delegated operations share the sync process's serialized queue, so a long `check` list can hold a queued send until that send's own `--timeout`; split long lists.
+
+## WhatsApp contacts
+
+- `save` writes an entry to the account's WhatsApp contacts, the address book WhatsApp syncs to the phone and every linked device, or renames an existing entry. Pass `--jid` (a phone number, phone-number JID, or a LID whose phone number the session knows) or `--phone`. `--full-name` defaults to `--first-name`; at least one is required. `--save-to-phone` also asks the phone to add the contact to its own address book.
+- Entries are keyed by phone-number JID, as WhatsApp's own clients write them; the paired LID from the session's verified mapping (or a WhatsApp lookup when none is stored) travels in the entry. A LID with no known phone number cannot be saved.
+- `delete` removes the entry for either identity of the person. It only sends a change when the session's app state holds an entry for that person; otherwise it reports `no saved WhatsApp contact` and changes nothing. Entries written under an app-state key older than the session's newest key are not found. Chats, messages, aliases, tags and push names are kept.
+- After `save` or `delete`, the saved names in `wacli.db` are updated at once, so `show` and `search` reflect them (subject to the usual precedence: alias, then system name, then WhatsApp names). `sync` also mirrors contacts saved or renamed on the phone or other devices. whatsmeow does not report contact removals made on other devices, so a contact deleted elsewhere keeps its old saved name locally until `save` or `delete` runs here.
+- JSON output: `save` returns `jid`, `lid`, `full_name`, `first_name`, `save_to_phone`; `delete` returns `jid`, `lid`, `deleted`, and `removed` (the entry identities that existed). If WhatsApp was updated but the local store write failed, the result carries `store_warning` and a warning goes to stderr.
+
+## Block list
+
+- `block` and `unblock` accept a phone number, phone-number JID or LID. whatsmeow resolves the LID WhatsApp needs for the change.
+- `blocklist` fetches the block list from WhatsApp. JSON is `{"count": N, "blocked": [{"jid", "phone_jid"}]}`; WhatsApp usually lists LIDs, and `phone_jid` is filled from the session's mapping when known.
+- wacli keeps a local copy of the block list: `block`/`unblock` update it for both identities, `blocklist` replaces it with the fetched list, and `sync` applies block and unblock notifications from other devices. `show` prints `Blocked: yes` (JSON `"blocked": true`) for a contact on that copy. A notification that only says the list changed carries no entries; run `blocklist` to refresh.
 
 ## Examples
 
@@ -49,4 +69,8 @@ wacli contacts refresh
 wacli contacts import-system --dry-run
 wacli contacts alias set --jid 1234567890@s.whatsapp.net --alias mom
 wacli contacts tags add --jid 1234567890@s.whatsapp.net --tag family
+wacli contacts save --phone "+1 202 555 0142" --first-name Alex --full-name "Alex Example"
+wacli contacts delete --jid 12025550142@s.whatsapp.net
+wacli contacts block --jid +12025550142
+wacli contacts blocklist --json
 ```

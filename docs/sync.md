@@ -40,13 +40,17 @@ wacli sync [--once] [--follow] [--idle-exit 30s] [--max-reconnect 5m] [--stale-t
   - `chats mark-read`, `chats mark-unread`, `chats archive`, `chats unarchive`, `chats pin`, `chats unpin`, `chats mute`, and `chats unmute`.
   - `groups create`, `groups info`, `groups rename`, `groups topic`, `groups description`, `groups announce-only`, `groups locked`, `groups join-approval`, `groups member-add-mode`, `groups photo set|remove`, `groups leave`, `groups join`, `groups refresh`, `groups invite link get|revoke`, `groups invite info`, `groups participants add|remove|promote|demote`, `groups requests list|approve|reject`, `groups prune` (the deletion; `--dry-run` reads without the lock), and `groups community subgroups|participants|link|unlink`.
   - `contacts alias set|rm`, `contacts tags add|rm`, and `contacts refresh`.
+  - `contacts check`, `contacts import-system` (without `--dry-run`, including `--clear`), `contacts save`, `contacts delete`, `contacts block`, `contacts unblock`, and `contacts blocklist`.
+  - `profile set-name`, `profile set-about`, `profile set-picture`, `profile remove-picture`, `profile picture-info`, `profile get-about`, and `profile business`.
+  - `privacy show`, `privacy set`, `privacy disappearing-default`, and `privacy status`.
   - `messages delete` (including `--for-me` and `--delete-media`), `messages revoke`, and `messages forward`.
   - `send status`, `status mute`, `status unmute`, and `status privacy`.
   - `channels list`, `channels info`, `channels join`, `channels leave`, `channels mute`, `channels unmute`, `channels messages`, `channels react`, `channels mark-viewed`, and `channels create`.
   - `calls reject`.
 - A delegated command prints the same result as when it runs directly, with or without `--json`. `--read-only` and `WACLI_READONLY` are checked before anything is delegated. The follow process cannot prompt, so an ambiguous chat or recipient name fails as it does with `--json`: pass a JID or `--pick N`.
 - A follow process started before a command could be delegated rejects that command's request kind without running it, and the command reports that the running sync process does not support it; restart `wacli sync` after upgrading, then run the command again.
-- Other commands that need the store lock are not delegated, including `history backfill` and `contacts import-system`.
+- Other commands that need the store lock are not delegated, including `history backfill`.
+- Sync mirrors WhatsApp contacts saved or renamed on any linked device into the local contacts table, and applies block and unblock notifications to the local copy of the block list (see [contacts](contacts.md)).
 - After connecting, sync fetches WhatsApp chat app-state deltas (`regular_high` and `regular_low`) so starred, delete-for-me, mute, archive, pin, mark-read, and status mute changes made while `wacli` was offline are caught up instead of relying only on live push notifications. Status mutes are mirrored into the `status_mutes` table; see [status](status.md).
 - Sync imports messages sent from your other linked devices into the destination chat with `from_me=true`, so local history covers both incoming and outgoing conversation sides.
 - Sync decrypts encrypted message edits and updates the original local row only when the authenticated sender, chat, and target message match. Malformed, redirected, or unsupported edits are rejected without changing local history or emitting a message webhook.
