@@ -97,6 +97,8 @@ type ParsedMessage struct {
 	Edited           bool
 	Revoked          bool
 	Call             *ParsedCallEvent
+	Pin              *PinChange
+	Keep             *KeepChange
 	// UnhandledPayload names the populated waE2E.Message field when parsing
 	// extracted no content at all. Empty when the message was understood.
 	UnhandledPayload string
@@ -178,7 +180,8 @@ func (pm ParsedMessage) HasContent() bool {
 // discarding content. Field names come from the protobuf descriptor, so new
 // WhatsApp message types are reported without needing a code change here.
 func markUnhandledPayload(m *waProto.Message, pm *ParsedMessage) {
-	if m == nil || pm == nil || pm.HasContent() {
+	// Pin and keep notices are understood protocol messages without content.
+	if m == nil || pm == nil || pm.HasContent() || pm.Pin != nil || pm.Keep != nil {
 		return
 	}
 	var names []string
@@ -254,6 +257,7 @@ func extractWAProto(m *waProto.Message, pm *ParsedMessage) *waProto.Message {
 	extractPollUpdate(m, pm)
 	extractCallLog(m, pm)
 	extractAlbum(m, pm)
+	extractChatActions(m, pm)
 
 	if ctx := contextInfoForMessage(m); ctx != nil {
 		if id := strings.TrimSpace(ctx.GetStanzaID()); id != "" {
