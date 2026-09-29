@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"fmt"
-	"os"
 	"runtime/debug"
 	"strings"
 	"sync"
@@ -87,7 +86,7 @@ func (a *App) BackfillMedia(ctx context.Context, opts BackfillMediaOptions) (Bac
 		workers = len(jobs)
 	}
 
-	a.emitEvent("media_backfill_start", map[string]any{
+	a.opEmitEvent(ctx, "media_backfill_start", map[string]any{
 		"pending":  pendingTotal,
 		"selected": len(jobs),
 		"chat_jid": opts.ChatJID,
@@ -112,24 +111,20 @@ func (a *App) BackfillMedia(ctx context.Context, opts BackfillMediaOptions) (Bac
 					defer func() {
 						if r := recover(); r != nil {
 							failed.Add(1)
-							if a.eventsEnabled() {
-								a.emitEvent("media_worker_panic", map[string]any{
-									"chat_jid": job.chatJID,
-									"msg_id":   job.msgID,
-									"panic":    fmt.Sprint(r),
-									"stack":    string(debug.Stack()),
-								})
-							} else {
-								fmt.Fprintf(os.Stderr, "media worker panic (recovered) for %s/%s: %v\n%s\n",
-									job.chatJID, job.msgID, r, debug.Stack())
-							}
+							stack := debug.Stack()
+							a.opEmitOrPrint(ctx, "media_worker_panic", map[string]any{
+								"chat_jid": job.chatJID,
+								"msg_id":   job.msgID,
+								"panic":    fmt.Sprint(r),
+								"stack":    string(stack),
+							}, "media worker panic (recovered) for %s/%s: %v\n%s\n", job.chatJID, job.msgID, r, stack)
 						}
 					}()
 					ok, err := a.downloadMediaJob(ctx, job)
 					switch {
 					case err != nil:
 						failed.Add(1)
-						a.emitWarning(
+						a.opEmitWarning(ctx,
 							"media_download_failed",
 							fmt.Sprintf("media download failed for %s/%s: %v", job.chatJID, job.msgID, err),
 							map[string]any{"chat_jid": job.chatJID, "msg_id": job.msgID, "error": err.Error()},
@@ -165,7 +160,7 @@ func (a *App) BackfillMedia(ctx context.Context, opts BackfillMediaOptions) (Bac
 	result.Skipped = int(skipped.Load())
 	result.Failed = int(failed.Load())
 
-	a.emitEvent("media_backfill_done", map[string]any{
+	a.opEmitEvent(ctx, "media_backfill_done", map[string]any{
 		"pending":    result.Pending,
 		"attempted":  result.Attempted,
 		"downloaded": result.Downloaded,

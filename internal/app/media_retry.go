@@ -291,7 +291,7 @@ func (a *App) RetryMedia(ctx context.Context, opts RetryMediaOptions) (MediaRetr
 			mu.Unlock()
 			result.Outcomes = append(result.Outcomes, a.classifyRetry(ctx, info, key.msgID, n, got, &result))
 		}
-		a.emitEvent("media_retry_progress", map[string]any{
+		a.opEmitEvent(ctx, "media_retry_progress", map[string]any{
 			"done":         end,
 			"total":        len(orderedKeys),
 			"recovered":    result.Recovered,

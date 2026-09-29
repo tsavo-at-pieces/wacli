@@ -74,98 +74,106 @@ func requestLabel(info types.MessageInfo) string {
 }
 
 func TestBackfillHistoryRetriesPhoneIdentityWhenLIDIsSilent(t *testing.T) {
-	tt := newIdentityFallbackTest(t, "m0")
-	var requests []string
-	pnCalls := 0
-	tt.f.onDemandHistory = func(info types.MessageInfo, count int) *events.HistorySync {
-		requests = append(requests, requestLabel(info))
-		if info.Chat != tt.pn {
-			return nil // this chat is filed under the phone number
+	forEachBackfillPath(t, func(t *testing.T, backfill backfillFunc) {
+		tt := newIdentityFallbackTest(t, "m0")
+		var requests []string
+		pnCalls := 0
+		tt.f.onDemandHistory = func(info types.MessageInfo, count int) *events.HistorySync {
+			requests = append(requests, requestLabel(info))
+			if info.Chat != tt.pn {
+				return nil // this chat is filed under the phone number
+			}
+			pnCalls++
+			hs := backfillTestResponse(tt.pn.String(), "older-"+string(rune('0'+pnCalls)), tt.base.Add(-time.Duration(pnCalls)*time.Second))
+			if pnCalls == 2 {
+				hs.Data.Conversations[0].EndOfHistoryTransferType = waHistorySync.Conversation_COMPLETE_AND_NO_MORE_MESSAGE_REMAIN_ON_PRIMARY.Enum()
+			}
+			return hs
 		}
-		pnCalls++
-		hs := backfillTestResponse(tt.pn.String(), "older-"+string(rune('0'+pnCalls)), tt.base.Add(-time.Duration(pnCalls)*time.Second))
-		if pnCalls == 2 {
-			hs.Data.Conversations[0].EndOfHistoryTransferType = waHistorySync.Conversation_COMPLETE_AND_NO_MORE_MESSAGE_REMAIN_ON_PRIMARY.Enum()
+		opts := backfillRetryOptions(tt.pn.String())
+		opts.Requests = 3
+		res, err := backfill(t, context.Background(), tt.a, opts)
+		if err != nil {
+			t.Fatalf("BackfillHistory: %v (requests %v)", err, requests)
 		}
-		return hs
-	}
-	opts := backfillRetryOptions(tt.pn.String())
-	opts.Requests = 3
-	res, err := tt.a.BackfillHistory(context.Background(), opts)
-	if err != nil {
-		t.Fatalf("BackfillHistory: %v (requests %v)", err, requests)
-	}
-	// The second batch goes straight to the identity that answered.
-	want := []string{"lid:m0", "s.whatsapp.net:m0", "s.whatsapp.net:older-1"}
-	if !slices.Equal(requests, want) {
-		t.Fatalf("requests = %v, want %v", requests, want)
-	}
-	if res.RequestsSent != 3 || res.ResponsesSeen != 2 || res.MessagesAdded != 2 {
-		t.Fatalf("result = %+v", res)
-	}
-	warnings := tt.identityRetryWarnings(t)
-	if len(warnings) != 1 || warnings[0]["request_chat_jid"] != tt.lid.String() || warnings[0]["retry_request_chat_jid"] != tt.pn.String() {
-		t.Fatalf("identity retry warnings = %v", warnings)
-	}
+		// The second batch goes straight to the identity that answered.
+		want := []string{"lid:m0", "s.whatsapp.net:m0", "s.whatsapp.net:older-1"}
+		if !slices.Equal(requests, want) {
+			t.Fatalf("requests = %v, want %v", requests, want)
+		}
+		if res.RequestsSent != 3 || res.ResponsesSeen != 2 || res.MessagesAdded != 2 {
+			t.Fatalf("result = %+v", res)
+		}
+		warnings := tt.identityRetryWarnings(t)
+		if len(warnings) != 1 || warnings[0]["request_chat_jid"] != tt.lid.String() || warnings[0]["retry_request_chat_jid"] != tt.pn.String() {
+			t.Fatalf("identity retry warnings = %v", warnings)
+		}
+	})
 }
 
 func TestBackfillHistoryKeepsLIDWhenItAnswers(t *testing.T) {
-	tt := newIdentityFallbackTest(t, "m0")
-	var requests []string
-	tt.f.onDemandHistory = func(info types.MessageInfo, count int) *events.HistorySync {
-		requests = append(requests, requestLabel(info))
-		if info.Chat != tt.lid {
-			t.Errorf("unexpected phone-number request %+v", info)
-			return nil
+	forEachBackfillPath(t, func(t *testing.T, backfill backfillFunc) {
+		tt := newIdentityFallbackTest(t, "m0")
+		var requests []string
+		tt.f.onDemandHistory = func(info types.MessageInfo, count int) *events.HistorySync {
+			requests = append(requests, requestLabel(info))
+			if info.Chat != tt.lid {
+				t.Errorf("unexpected phone-number request %+v", info)
+				return nil
+			}
+			hs := backfillTestResponse(tt.lid.String(), "older", tt.base.Add(-time.Second))
+			hs.Data.Conversations[0].EndOfHistoryTransferType = waHistorySync.Conversation_COMPLETE_AND_NO_MORE_MESSAGE_REMAIN_ON_PRIMARY.Enum()
+			return hs
 		}
-		hs := backfillTestResponse(tt.lid.String(), "older", tt.base.Add(-time.Second))
-		hs.Data.Conversations[0].EndOfHistoryTransferType = waHistorySync.Conversation_COMPLETE_AND_NO_MORE_MESSAGE_REMAIN_ON_PRIMARY.Enum()
-		return hs
-	}
-	res, err := tt.a.BackfillHistory(context.Background(), backfillRetryOptions(tt.pn.String()))
-	if err != nil {
-		t.Fatalf("BackfillHistory: %v", err)
-	}
-	if !slices.Equal(requests, []string{"lid:m0"}) || res.RequestsSent != 1 || res.MessagesAdded != 1 {
-		t.Fatalf("requests = %v, result = %+v", requests, res)
-	}
-	if warnings := tt.identityRetryWarnings(t); len(warnings) != 0 {
-		t.Fatalf("unexpected identity retry: %v", warnings)
-	}
+		res, err := backfill(t, context.Background(), tt.a, backfillRetryOptions(tt.pn.String()))
+		if err != nil {
+			t.Fatalf("BackfillHistory: %v", err)
+		}
+		if !slices.Equal(requests, []string{"lid:m0"}) || res.RequestsSent != 1 || res.MessagesAdded != 1 {
+			t.Fatalf("requests = %v, result = %+v", requests, res)
+		}
+		if warnings := tt.identityRetryWarnings(t); len(warnings) != 0 {
+			t.Fatalf("unexpected identity retry: %v", warnings)
+		}
+	})
 }
 
 func TestBackfillHistoryTriesBothIdentitiesForEachAnchor(t *testing.T) {
-	tt := newIdentityFallbackTest(t, "m0", "m1")
-	var requests []string
-	tt.f.onDemandHistory = func(info types.MessageInfo, count int) *events.HistorySync {
-		requests = append(requests, requestLabel(info))
-		return nil
-	}
-	_, err := tt.a.BackfillHistory(context.Background(), backfillRetryOptions(tt.pn.String()))
-	if err == nil || !strings.Contains(err.Error(), "timed out waiting for on-demand history sync response") {
-		t.Fatalf("error = %v, want timeout", err)
-	}
-	want := []string{"lid:m0", "s.whatsapp.net:m0", "lid:m1", "s.whatsapp.net:m1"}
-	if !slices.Equal(requests, want) {
-		t.Fatalf("requests = %v, want %v", requests, want)
-	}
-	if warnings := tt.identityRetryWarnings(t); len(warnings) != 2 {
-		t.Fatalf("identity retry warnings = %d, want 2", len(warnings))
-	}
+	forEachBackfillPath(t, func(t *testing.T, backfill backfillFunc) {
+		tt := newIdentityFallbackTest(t, "m0", "m1")
+		var requests []string
+		tt.f.onDemandHistory = func(info types.MessageInfo, count int) *events.HistorySync {
+			requests = append(requests, requestLabel(info))
+			return nil
+		}
+		_, err := backfill(t, context.Background(), tt.a, backfillRetryOptions(tt.pn.String()))
+		if err == nil || !strings.Contains(err.Error(), "timed out waiting for on-demand history sync response") {
+			t.Fatalf("error = %v, want timeout", err)
+		}
+		want := []string{"lid:m0", "s.whatsapp.net:m0", "lid:m1", "s.whatsapp.net:m1"}
+		if !slices.Equal(requests, want) {
+			t.Fatalf("requests = %v, want %v", requests, want)
+		}
+		if warnings := tt.identityRetryWarnings(t); len(warnings) != 2 {
+			t.Fatalf("identity retry warnings = %d, want 2", len(warnings))
+		}
+	})
 }
 
 func TestBackfillHistoryUnmappedChatHasNoIdentityRetry(t *testing.T) {
-	tt := newIdentityFallbackTest(t, "m0")
-	delete(tt.f.lids, tt.lid)
-	var requests []string
-	tt.f.onDemandHistory = func(info types.MessageInfo, count int) *events.HistorySync {
-		requests = append(requests, requestLabel(info))
-		return nil
-	}
-	if _, err := tt.a.BackfillHistory(context.Background(), backfillRetryOptions(tt.pn.String())); err == nil {
-		t.Fatal("expected timeout")
-	}
-	if !slices.Equal(requests, []string{"s.whatsapp.net:m0"}) {
-		t.Fatalf("requests = %v", requests)
-	}
+	forEachBackfillPath(t, func(t *testing.T, backfill backfillFunc) {
+		tt := newIdentityFallbackTest(t, "m0")
+		delete(tt.f.lids, tt.lid)
+		var requests []string
+		tt.f.onDemandHistory = func(info types.MessageInfo, count int) *events.HistorySync {
+			requests = append(requests, requestLabel(info))
+			return nil
+		}
+		if _, err := backfill(t, context.Background(), tt.a, backfillRetryOptions(tt.pn.String())); err == nil {
+			t.Fatal("expected timeout")
+		}
+		if !slices.Equal(requests, []string{"s.whatsapp.net:m0"}) {
+			t.Fatalf("requests = %v", requests)
+		}
+	})
 }

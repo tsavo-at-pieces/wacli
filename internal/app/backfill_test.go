@@ -23,147 +23,155 @@ import (
 )
 
 func TestBackfillHistoryRetriesUnansweredAnchor(t *testing.T) {
-	for _, firstID := range []string{"3EB0-stalled", "AC-stalled"} {
-		t.Run(firstID, func(t *testing.T) {
-			a, f, chat, base := newBackfillRetryTest(t, firstID, "fallback")
-			var eventLog bytes.Buffer
-			a.opts.Events = out.NewEventWriter(&eventLog, true)
-			var anchors []string
-			f.onDemandHistory = func(info types.MessageInfo, count int) *events.HistorySync {
-				anchors = append(anchors, info.ID)
-				if info.ID == firstID {
-					return nil
+	forEachBackfillPath(t, func(t *testing.T, backfill backfillFunc) {
+		for _, firstID := range []string{"3EB0-stalled", "AC-stalled"} {
+			t.Run(firstID, func(t *testing.T) {
+				a, f, chat, base := newBackfillRetryTest(t, firstID, "fallback")
+				var eventLog bytes.Buffer
+				a.opts.Events = out.NewEventWriter(&eventLog, true)
+				var anchors []string
+				f.onDemandHistory = func(info types.MessageInfo, count int) *events.HistorySync {
+					anchors = append(anchors, info.ID)
+					if info.ID == firstID {
+						return nil
+					}
+					if info.Chat.String() != chat || !info.IsFromMe || !info.Timestamp.Equal(base) || count != 50 {
+						t.Errorf("fallback request = %+v, count = %d", info, count)
+					}
+					return backfillTestResponse(chat, "older", base.Add(-time.Second))
 				}
-				if info.Chat.String() != chat || !info.IsFromMe || !info.Timestamp.Equal(base) || count != 50 {
-					t.Errorf("fallback request = %+v, count = %d", info, count)
+				res, err := backfill(t, context.Background(), a, backfillRetryOptions(chat))
+				if err != nil {
+					t.Fatalf("BackfillHistory: %v (anchors %v)", err, anchors)
 				}
-				return backfillTestResponse(chat, "older", base.Add(-time.Second))
-			}
-			res, err := a.BackfillHistory(context.Background(), backfillRetryOptions(chat))
-			if err != nil {
-				t.Fatalf("BackfillHistory: %v (anchors %v)", err, anchors)
-			}
-			if !slices.Equal(anchors, []string{firstID, "fallback"}) {
-				t.Fatalf("anchors = %v", anchors)
-			}
-			if res.RequestsSent != 2 || res.ResponsesSeen != 1 || res.MessagesAdded != 1 {
-				t.Fatalf("result = %+v", res)
-			}
-			oldest, err := a.db.GetOldestMessageInfo(chat)
-			if err != nil || oldest.MsgID != "older" {
-				t.Fatalf("oldest = %+v, err = %v", oldest, err)
-			}
-			warnings := 0
-			for line := range bytes.SplitSeq(bytes.TrimSpace(eventLog.Bytes()), []byte("\n")) {
-				var event struct {
-					Data map[string]any `json:"data"`
+				if !slices.Equal(anchors, []string{firstID, "fallback"}) {
+					t.Fatalf("anchors = %v", anchors)
 				}
-				if err := json.Unmarshal(line, &event); err != nil {
-					t.Fatalf("invalid lifecycle JSON: %s: %v", line, err)
+				if res.RequestsSent != 2 || res.ResponsesSeen != 1 || res.MessagesAdded != 1 {
+					t.Fatalf("result = %+v", res)
 				}
-				if event.Data["code"] == "backfill_anchor_retry" {
-					warnings++
-					if event.Data["anchor_msg_id"] != firstID || event.Data["retry_anchor_msg_id"] != "fallback" {
-						t.Fatalf("retry warning = %v", event)
+				oldest, err := a.db.GetOldestMessageInfo(chat)
+				if err != nil || oldest.MsgID != "older" {
+					t.Fatalf("oldest = %+v, err = %v", oldest, err)
+				}
+				warnings := 0
+				for line := range bytes.SplitSeq(bytes.TrimSpace(eventLog.Bytes()), []byte("\n")) {
+					var event struct {
+						Data map[string]any `json:"data"`
+					}
+					if err := json.Unmarshal(line, &event); err != nil {
+						t.Fatalf("invalid lifecycle JSON: %s: %v", line, err)
+					}
+					if event.Data["code"] == "backfill_anchor_retry" {
+						warnings++
+						if event.Data["anchor_msg_id"] != firstID || event.Data["retry_anchor_msg_id"] != "fallback" {
+							t.Fatalf("retry warning = %v", event)
+						}
 					}
 				}
-			}
-			if warnings != 1 {
-				t.Fatalf("retry warnings = %d, want 1; events: %s", warnings, &eventLog)
-			}
-		})
-	}
+				if warnings != 1 {
+					t.Fatalf("retry warnings = %d, want 1; events: %s", warnings, &eventLog)
+				}
+			})
+		}
+	})
 }
 
 func TestBackfillHistoryRetryStops(t *testing.T) {
-	for _, tc := range []struct {
-		name       string
-		ids        []string
-		cancel     bool
-		noProgress bool
-		wantCalls  int
-	}{
-		{name: "single anchor", ids: []string{"first"}, wantCalls: 1},
-		{name: "two silent anchors", ids: []string{"first", "second", "third"}, wantCalls: 2},
-		{name: "cancelled", ids: []string{"first", "second"}, cancel: true, wantCalls: 1},
-		{name: "fallback without older history", ids: []string{"first", "second", "third"}, noProgress: true, wantCalls: 2},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			a, f, chat, base := newBackfillRetryTest(t, tc.ids...)
-			ctx, cancel := context.WithCancel(context.Background())
-			defer cancel()
-			calls := 0
-			f.onDemandHistory = func(info types.MessageInfo, count int) *events.HistorySync {
-				calls++
-				if tc.cancel {
-					cancel()
+	forEachBackfillPath(t, func(t *testing.T, backfill backfillFunc) {
+		for _, tc := range []struct {
+			name       string
+			ids        []string
+			cancel     bool
+			noProgress bool
+			wantCalls  int
+		}{
+			{name: "single anchor", ids: []string{"first"}, wantCalls: 1},
+			{name: "two silent anchors", ids: []string{"first", "second", "third"}, wantCalls: 2},
+			{name: "cancelled", ids: []string{"first", "second"}, cancel: true, wantCalls: 1},
+			{name: "fallback without older history", ids: []string{"first", "second", "third"}, noProgress: true, wantCalls: 2},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				a, f, chat, base := newBackfillRetryTest(t, tc.ids...)
+				ctx, cancel := context.WithCancel(context.Background())
+				defer cancel()
+				calls := 0
+				f.onDemandHistory = func(info types.MessageInfo, count int) *events.HistorySync {
+					calls++
+					if tc.cancel {
+						cancel()
+					}
+					if tc.noProgress && calls == 2 {
+						return backfillTestResponse(chat, "first", base)
+					}
+					return nil
 				}
-				if tc.noProgress && calls == 2 {
-					return backfillTestResponse(chat, "first", base)
+				opts := backfillRetryOptions(chat)
+				opts.Requests = 3
+				_, err := backfill(t, ctx, a, opts)
+				switch {
+				case tc.cancel:
+					if !errors.Is(err, context.Canceled) {
+						t.Fatalf("error = %v, want cancellation", err)
+					}
+				case tc.noProgress:
+					if err != nil {
+						t.Fatalf("BackfillHistory: %v", err)
+					}
+				default:
+					if err == nil || !strings.Contains(err.Error(), "timed out waiting for on-demand history sync response") {
+						t.Fatalf("error = %v, want timeout", err)
+					}
 				}
-				return nil
-			}
-			opts := backfillRetryOptions(chat)
-			opts.Requests = 3
-			_, err := a.BackfillHistory(ctx, opts)
-			switch {
-			case tc.cancel:
-				if !errors.Is(err, context.Canceled) {
-					t.Fatalf("error = %v, want cancellation", err)
+				if calls != tc.wantCalls {
+					t.Fatalf("requests = %d, want %d", calls, tc.wantCalls)
 				}
-			case tc.noProgress:
-				if err != nil {
-					t.Fatalf("BackfillHistory: %v", err)
-				}
-			default:
-				if err == nil || !strings.Contains(err.Error(), "timed out waiting for on-demand history sync response") {
-					t.Fatalf("error = %v, want timeout", err)
-				}
-			}
-			if calls != tc.wantCalls {
-				t.Fatalf("requests = %d, want %d", calls, tc.wantCalls)
-			}
-		})
-	}
+			})
+		}
+	})
 }
 
 func TestBackfillHistoryContinuesFromRecoveredOldest(t *testing.T) {
-	a, f, chat, base := newBackfillRetryTest(t, "stalled", "fallback")
-	var anchors []string
-	f.onDemandHistory = func(info types.MessageInfo, count int) *events.HistorySync {
-		anchors = append(anchors, info.ID)
-		switch info.ID {
-		case "fallback":
-			return backfillTestResponse(chat, "older", base.Add(-time.Second))
-		case "older":
-			return backfillTestResponse(chat, "oldest", base.Add(-2*time.Second))
-		default:
-			return nil
+	forEachBackfillPath(t, func(t *testing.T, backfill backfillFunc) {
+		a, f, chat, base := newBackfillRetryTest(t, "stalled", "fallback")
+		var anchors []string
+		f.onDemandHistory = func(info types.MessageInfo, count int) *events.HistorySync {
+			anchors = append(anchors, info.ID)
+			switch info.ID {
+			case "fallback":
+				return backfillTestResponse(chat, "older", base.Add(-time.Second))
+			case "older":
+				return backfillTestResponse(chat, "oldest", base.Add(-2*time.Second))
+			default:
+				return nil
+			}
 		}
-	}
-	opts := backfillRetryOptions(chat)
-	opts.Requests = 2
-	res, err := a.BackfillHistory(context.Background(), opts)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !slices.Equal(anchors, []string{"stalled", "fallback", "older"}) || res.RequestsSent != 3 || res.ResponsesSeen != 2 || res.MessagesAdded != 2 {
-		t.Fatalf("anchors = %v, result = %+v", anchors, res)
-	}
+		opts := backfillRetryOptions(chat)
+		opts.Requests = 2
+		res, err := backfill(t, context.Background(), a, opts)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Equal(anchors, []string{"stalled", "fallback", "older"}) || res.RequestsSent != 3 || res.ResponsesSeen != 2 || res.MessagesAdded != 2 {
+			t.Fatalf("anchors = %v, result = %+v", anchors, res)
+		}
+	})
 }
 
 func TestBackfillHistoryDoesNotRetryTransportError(t *testing.T) {
-	a, f, chat, _ := newBackfillRetryTest(t, "first", "second")
-	f.onDemandErr = errors.New("transport unavailable")
-	var eventLog bytes.Buffer
-	a.opts.Events = out.NewEventWriter(&eventLog, true)
-	_, err := a.BackfillHistory(context.Background(), backfillRetryOptions(chat))
-	if !errors.Is(err, f.onDemandErr) {
-		t.Fatalf("error = %v, want transport error", err)
-	}
-	if strings.Count(eventLog.String(), `"event":"backfill_requesting"`) != 1 || strings.Contains(eventLog.String(), "backfill_anchor_retry") {
-		t.Fatalf("unexpected retry: %s", &eventLog)
-	}
+	forEachBackfillPath(t, func(t *testing.T, backfill backfillFunc) {
+		a, f, chat, _ := newBackfillRetryTest(t, "first", "second")
+		f.onDemandErr = errors.New("transport unavailable")
+		var eventLog bytes.Buffer
+		a.opts.Events = out.NewEventWriter(&eventLog, true)
+		_, err := backfill(t, context.Background(), a, backfillRetryOptions(chat))
+		if !errors.Is(err, f.onDemandErr) {
+			t.Fatalf("error = %v, want transport error", err)
+		}
+		if strings.Count(eventLog.String(), `"event":"backfill_requesting"`) != 1 || strings.Contains(eventLog.String(), "backfill_anchor_retry") {
+			t.Fatalf("unexpected retry: %s", &eventLog)
+		}
+	})
 }
 
 func newBackfillRetryTest(t *testing.T, ids ...string) (*App, *fakeWA, string, time.Time) {
@@ -206,144 +214,154 @@ func backfillTestResponse(chat, id string, timestamp time.Time) *events.HistoryS
 }
 
 func TestBackfillHistoryAddsOlderMessages(t *testing.T) {
-	a := newTestApp(t)
-	f := newFakeWA()
-	a.wa = f
+	forEachBackfillPath(t, func(t *testing.T, backfill backfillFunc) {
+		a := newTestApp(t)
+		f := newFakeWA()
+		a.wa = f
 
-	chat := types.JID{User: "123", Server: types.DefaultUserServer}
-	chatStr := chat.String()
-	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+		chat := types.JID{User: "123", Server: types.DefaultUserServer}
+		chatStr := chat.String()
+		base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	if err := a.db.UpsertChat(chatStr, "dm", "Alice", base); err != nil {
-		t.Fatalf("UpsertChat: %v", err)
-	}
-	if err := a.db.UpsertMessage(storeUpsertMessage(chatStr, "m2", base.Add(2*time.Second), "newer")); err != nil {
-		t.Fatalf("UpsertMessage: %v", err)
-	}
-
-	f.onDemandHistory = func(lastKnown types.MessageInfo, count int) *events.HistorySync {
-		older := &waWeb.WebMessageInfo{
-			Key: &waCommon.MessageKey{
-				RemoteJID: proto.String(chatStr),
-				FromMe:    proto.Bool(false),
-				ID:        proto.String("m1"),
-			},
-			MessageTimestamp: proto.Uint64(uint64(base.Add(1 * time.Second).Unix())),
-			Message:          &waProto.Message{Conversation: proto.String("older")},
+		if err := a.db.UpsertChat(chatStr, "dm", "Alice", base); err != nil {
+			t.Fatalf("UpsertChat: %v", err)
 		}
-		return &events.HistorySync{
-			Data: &waHistorySync.HistorySync{
-				SyncType: waHistorySync.HistorySync_ON_DEMAND.Enum(),
-				Conversations: []*waHistorySync.Conversation{{
-					ID:                       proto.String(chatStr),
-					EndOfHistoryTransfer:     proto.Bool(true),
-					EndOfHistoryTransferType: waHistorySync.Conversation_COMPLETE_AND_NO_MORE_MESSAGE_REMAIN_ON_PRIMARY.Enum(),
-					Messages:                 []*waHistorySync.HistorySyncMsg{{Message: older}},
-				}},
-			},
+		if err := a.db.UpsertMessage(storeUpsertMessage(chatStr, "m2", base.Add(2*time.Second), "newer")); err != nil {
+			t.Fatalf("UpsertMessage: %v", err)
 		}
-	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+		f.onDemandHistory = func(lastKnown types.MessageInfo, count int) *events.HistorySync {
+			older := &waWeb.WebMessageInfo{
+				Key: &waCommon.MessageKey{
+					RemoteJID: proto.String(chatStr),
+					FromMe:    proto.Bool(false),
+					ID:        proto.String("m1"),
+				},
+				MessageTimestamp: proto.Uint64(uint64(base.Add(1 * time.Second).Unix())),
+				Message:          &waProto.Message{Conversation: proto.String("older")},
+			}
+			return &events.HistorySync{
+				Data: &waHistorySync.HistorySync{
+					SyncType: waHistorySync.HistorySync_ON_DEMAND.Enum(),
+					Conversations: []*waHistorySync.Conversation{{
+						ID:                       proto.String(chatStr),
+						EndOfHistoryTransfer:     proto.Bool(true),
+						EndOfHistoryTransferType: waHistorySync.Conversation_COMPLETE_AND_NO_MORE_MESSAGE_REMAIN_ON_PRIMARY.Enum(),
+						Messages:                 []*waHistorySync.HistorySyncMsg{{Message: older}},
+					}},
+				},
+			}
+		}
 
-	res, err := a.BackfillHistory(ctx, BackfillOptions{
-		ChatJID:        chatStr,
-		Count:          50,
-		Requests:       1,
-		WaitPerRequest: 1 * time.Second,
-		IdleExit:       200 * time.Millisecond,
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		res, err := backfill(t, ctx, a, BackfillOptions{
+			ChatJID:        chatStr,
+			Count:          50,
+			Requests:       1,
+			WaitPerRequest: 1 * time.Second,
+			IdleExit:       200 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatalf("BackfillHistory: %v", err)
+		}
+		if res.MessagesAdded <= 0 {
+			t.Fatalf("expected messages to be added, got %d", res.MessagesAdded)
+		}
+
+		oldest, err := a.db.GetOldestMessageInfo(chatStr)
+		if err != nil {
+			t.Fatalf("GetOldestMessageInfo: %v", err)
+		}
+		if oldest.MsgID != "m1" {
+			t.Fatalf("expected oldest m1, got %q", oldest.MsgID)
+		}
+		// The direct path turns manual download on around its own one-shot
+		// sync. Through a running sync, only that sync turns it on and off.
+		want := []bool{true, true, false, false}
+		if strings.HasSuffix(t.Name(), "/sync-follow") {
+			want = []bool{true, false}
+		}
+		if got := f.manualHistorySyncCalls; !slices.Equal(got, want) {
+			t.Fatalf("manual history sync calls = %v, want %v", got, want)
+		}
 	})
-	if err != nil {
-		t.Fatalf("BackfillHistory: %v", err)
-	}
-	if res.MessagesAdded <= 0 {
-		t.Fatalf("expected messages to be added, got %d", res.MessagesAdded)
-	}
-
-	oldest, err := a.db.GetOldestMessageInfo(chatStr)
-	if err != nil {
-		t.Fatalf("GetOldestMessageInfo: %v", err)
-	}
-	if oldest.MsgID != "m1" {
-		t.Fatalf("expected oldest m1, got %q", oldest.MsgID)
-	}
-	if got := f.manualHistorySyncCalls; len(got) != 4 || !got[0] || !got[1] || got[2] || got[3] {
-		t.Fatalf("manual history sync calls = %v, want [true true false false]", got)
-	}
 }
 
 func TestBackfillHistoryDownloadsManualOnDemandNotification(t *testing.T) {
-	a := newTestApp(t)
-	f := newFakeWA()
-	a.wa = f
+	forEachBackfillPath(t, func(t *testing.T, backfill backfillFunc) {
+		a := newTestApp(t)
+		f := newFakeWA()
+		a.wa = f
 
-	chat := types.JID{User: "123", Server: types.DefaultUserServer}
-	chatStr := chat.String()
-	base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+		chat := types.JID{User: "123", Server: types.DefaultUserServer}
+		chatStr := chat.String()
+		base := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 
-	if err := a.db.UpsertChat(chatStr, "dm", "Alice", base); err != nil {
-		t.Fatalf("UpsertChat: %v", err)
-	}
-	if err := a.db.UpsertMessage(storeUpsertMessage(chatStr, "m2", base.Add(2*time.Second), "newer")); err != nil {
-		t.Fatalf("UpsertMessage: %v", err)
-	}
+		if err := a.db.UpsertChat(chatStr, "dm", "Alice", base); err != nil {
+			t.Fatalf("UpsertChat: %v", err)
+		}
+		if err := a.db.UpsertMessage(storeUpsertMessage(chatStr, "m2", base.Add(2*time.Second), "newer")); err != nil {
+			t.Fatalf("UpsertMessage: %v", err)
+		}
 
-	syncType := waE2E.HistorySyncType_ON_DEMAND
-	notif := &waE2E.HistorySyncNotification{SyncType: &syncType}
-	f.onDemandEvent = func(lastKnown types.MessageInfo, count int) any {
-		return &events.Message{
-			Message: &waProto.Message{
-				ProtocolMessage: &waProto.ProtocolMessage{
-					HistorySyncNotification: notif,
+		syncType := waE2E.HistorySyncType_ON_DEMAND
+		notif := &waE2E.HistorySyncNotification{SyncType: &syncType}
+		f.onDemandEvent = func(lastKnown types.MessageInfo, count int) any {
+			return &events.Message{
+				Message: &waProto.Message{
+					ProtocolMessage: &waProto.ProtocolMessage{
+						HistorySyncNotification: notif,
+					},
 				},
-			},
+			}
 		}
-	}
-	downloadCalls := 0
-	f.downloadHistory = func(got *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
-		downloadCalls++
-		if got != notif {
-			t.Fatalf("DownloadHistorySync notification = %p, want %p", got, notif)
+		downloadCalls := 0
+		f.downloadHistory = func(got *waE2E.HistorySyncNotification) (*waHistorySync.HistorySync, error) {
+			downloadCalls++
+			if got != notif {
+				t.Fatalf("DownloadHistorySync notification = %p, want %p", got, notif)
+			}
+			older := &waWeb.WebMessageInfo{
+				Key: &waCommon.MessageKey{
+					RemoteJID: proto.String(chatStr),
+					FromMe:    proto.Bool(false),
+					ID:        proto.String("m1"),
+				},
+				MessageTimestamp: proto.Uint64(uint64(base.Add(1 * time.Second).Unix())),
+				Message:          &waProto.Message{Conversation: proto.String("older")},
+			}
+			return &waHistorySync.HistorySync{
+				SyncType: waHistorySync.HistorySync_ON_DEMAND.Enum(),
+				Conversations: []*waHistorySync.Conversation{{
+					ID:                       proto.String(chatStr),
+					EndOfHistoryTransferType: waHistorySync.Conversation_COMPLETE_AND_NO_MORE_MESSAGE_REMAIN_ON_PRIMARY.Enum(),
+					Messages:                 []*waHistorySync.HistorySyncMsg{{Message: older}},
+				}},
+			}, nil
 		}
-		older := &waWeb.WebMessageInfo{
-			Key: &waCommon.MessageKey{
-				RemoteJID: proto.String(chatStr),
-				FromMe:    proto.Bool(false),
-				ID:        proto.String("m1"),
-			},
-			MessageTimestamp: proto.Uint64(uint64(base.Add(1 * time.Second).Unix())),
-			Message:          &waProto.Message{Conversation: proto.String("older")},
-		}
-		return &waHistorySync.HistorySync{
-			SyncType: waHistorySync.HistorySync_ON_DEMAND.Enum(),
-			Conversations: []*waHistorySync.Conversation{{
-				ID:                       proto.String(chatStr),
-				EndOfHistoryTransferType: waHistorySync.Conversation_COMPLETE_AND_NO_MORE_MESSAGE_REMAIN_ON_PRIMARY.Enum(),
-				Messages:                 []*waHistorySync.HistorySyncMsg{{Message: older}},
-			}},
-		}, nil
-	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
 
-	res, err := a.BackfillHistory(ctx, BackfillOptions{
-		ChatJID:        chatStr,
-		Count:          50,
-		Requests:       1,
-		WaitPerRequest: 1 * time.Second,
-		IdleExit:       200 * time.Millisecond,
+		res, err := backfill(t, ctx, a, BackfillOptions{
+			ChatJID:        chatStr,
+			Count:          50,
+			Requests:       1,
+			WaitPerRequest: 1 * time.Second,
+			IdleExit:       200 * time.Millisecond,
+		})
+		if err != nil {
+			t.Fatalf("BackfillHistory: %v", err)
+		}
+		if downloadCalls != 1 {
+			t.Fatalf("download calls = %d, want 1", downloadCalls)
+		}
+		if res.MessagesAdded <= 0 {
+			t.Fatalf("expected messages to be added, got %d", res.MessagesAdded)
+		}
 	})
-	if err != nil {
-		t.Fatalf("BackfillHistory: %v", err)
-	}
-	if downloadCalls != 1 {
-		t.Fatalf("download calls = %d, want 1", downloadCalls)
-	}
-	if res.MessagesAdded <= 0 {
-		t.Fatalf("expected messages to be added, got %d", res.MessagesAdded)
-	}
 }
 
 func TestNormalizeBackfillOptions(t *testing.T) {
