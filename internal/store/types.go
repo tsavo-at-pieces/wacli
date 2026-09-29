@@ -101,8 +101,13 @@ type Message struct {
 	DeletedAt       *time.Time `json:"deleted_at,omitempty"`
 	DeletionReason  string     `json:"deletion_reason,omitempty"`
 	PayloadPurgedAt *time.Time `json:"payload_purged_at,omitempty"`
-	Snippet         string
-	rowID           int64
+	// Transcript and TranscriptEngine are filled by the CLI from the
+	// transcripts.db sidecar for audio messages; wacli.db never stores them.
+	// nil means not transcribed; an empty string means no speech was heard.
+	Transcript       *string `json:"transcript,omitempty"`
+	TranscriptEngine string  `json:"transcript_engine,omitempty"`
+	Snippet          string
+	rowID            int64
 }
 
 type MessageInfo struct {

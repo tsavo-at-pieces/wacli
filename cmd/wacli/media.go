@@ -17,9 +17,10 @@ import (
 func newMediaCmd(flags *rootFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "media",
-		Short: "Media download",
+		Short: "Media download and transcription",
 	}
 	cmd.AddCommand(newMediaDownloadCmd(flags))
+	cmd.AddCommand(newMediaTranscribeCmd(flags))
 	cmd.AddCommand(newMediaBackfillCmd(flags))
 	cmd.AddCommand(newMediaRetryCmd(flags))
 	return cmd

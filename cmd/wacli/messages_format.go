@@ -103,6 +103,9 @@ func writeMessageShow(dst io.Writer, m store.Message) error {
 			fmt.Fprintf(dst, "Downloaded at: %s\n", m.DownloadedAt.Local().Format(time.RFC3339))
 		}
 	}
+	if m.Transcript != nil && m.TranscriptEngine != "" {
+		fmt.Fprintf(dst, "Transcribed by: %s\n", sanitize(m.TranscriptEngine))
+	}
 	if m.IsForwarded {
 		fmt.Fprintln(dst, "Forwarded: yes")
 		if m.ForwardingScore > 0 {
@@ -189,6 +192,9 @@ func messageText(m store.Message) string {
 	}
 	if m.Revoked {
 		return store.DeletedMessageDisplayText
+	}
+	if m.Transcript != nil {
+		return voiceMessageText(m)
 	}
 	if text := strings.TrimSpace(m.DisplayText); text != "" {
 		return text

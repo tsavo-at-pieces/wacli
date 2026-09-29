@@ -75,6 +75,7 @@ func newMessagesListCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			msgs = resolveMessageSenderNames(ctx, a, msgs)
+			msgs = attachTranscripts(ctx, a, msgs)
 
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, map[string]any{
@@ -135,7 +136,7 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 
-			msgs, err := a.DB().SearchMessages(store.SearchMessagesParams{
+			params := store.SearchMessagesParams{
 				Query:     args[0],
 				ChatJIDs:  chatJIDs,
 				From:      from,
@@ -146,7 +147,12 @@ func newMessagesSearchCmd(flags *rootFlags) *cobra.Command {
 				Type:      msgType,
 				Forwarded: forwarded,
 				Starred:   starred,
-			})
+			}
+			msgs, err := a.DB().SearchMessages(params)
+			if err != nil {
+				return err
+			}
+			msgs, err = searchWithTranscripts(ctx, a, params, msgs)
 			if err != nil {
 				return err
 			}
@@ -221,6 +227,7 @@ func newMessagesStarredCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			msgs = resolveMessageSenderNames(ctx, a, msgs)
+			msgs = attachTranscripts(ctx, a, msgs)
 
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, map[string]any{
@@ -269,6 +276,7 @@ func newMessagesShowCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			m = resolveMessageSenderNames(ctx, a, []store.Message{m})[0]
+			m = attachTranscripts(ctx, a, []store.Message{m})[0]
 
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, m)
@@ -315,6 +323,7 @@ func newMessagesContextCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			msgs = resolveMessageSenderNames(ctx, a, msgs)
+			msgs = attachTranscripts(ctx, a, msgs)
 
 			if flags.asJSON {
 				return out.WriteJSON(os.Stdout, msgs)
@@ -371,6 +380,7 @@ func newMessagesExportCmd(flags *rootFlags) *cobra.Command {
 				return err
 			}
 			msgs = resolveMessageSenderNames(ctx, a, msgs)
+			msgs = attachTranscripts(ctx, a, msgs)
 
 			dst := os.Stdout
 			if output != "" {
