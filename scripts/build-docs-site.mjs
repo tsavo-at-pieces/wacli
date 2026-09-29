@@ -22,7 +22,7 @@ const brewInstall = "brew install openclaw/tap/wacli";
 const sections = [
   ["Start", ["index.md", "install.md", "quickstart.md", "overview.md"]],
   ["Auth & Sync", ["auth.md", "accounts.md", "sync.md", "history.md", "doctor.md"]],
-  ["Messages", ["messages.md", "send.md", "media.md", "presence.md", "channels.md"]],
+  ["Messages", ["messages.md", "send.md", "media.md", "presence.md", "channels.md", "status.md"]],
   ["Contacts & Groups", ["contacts.md", "contacts-import-system.md", "chats.md", "groups.md", "profile.md"]],
   ["Reference", ["spec.md", "docs.md", "store.md", "integrations.md", "completion.md", "version.md", "help.md", "release.md"]],
 ];

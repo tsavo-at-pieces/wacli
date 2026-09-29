@@ -29,13 +29,13 @@ Store selection and the supported legacy Linux directory fallback are documented
 
 Commands that write local state or access the live WhatsApp session acquire the per-store lock. `--lock-wait` controls bounded waiting. `--read-only` and `WACLI_READONLY=1` reject intentional writes; local readers can inspect the mirror while sync owns the lock.
 
-After `sync --follow` completes startup, its local delegate socket accepts supported send, chat-state, group, contact-metadata, and message-management operations. The follow process retains ownership of the session and store lock. The invoking command still validates writable mode and preserves its normal result format. See [sync](sync.md) for the supported operations and upgrade constraints.
+After `sync --follow` completes startup, its local delegate socket accepts supported send, chat-state, group, contact-metadata, message-management, status, channel, and call-rejection operations. The follow process retains ownership of the session and store lock. The invoking command still validates writable mode and preserves its normal result format. See [sync](sync.md) for the supported operations and upgrade constraints.
 
 ## Authentication and synchronization
 
 `auth` handles explicit QR or phone-number pairing and then bootstrap sync. `sync` requires an existing session and never displays a QR code. Pairing states that cannot be completed safely, including passkey verification, return an actionable error; see [auth](auth.md).
 
-`internal/app` routes live and history events through the message parser and persistence layer. Message upserts use `(chat_jid, msg_id)` identities so replay does not create duplicate messages. Status broadcasts have their own table. Location, poll, star, and call metadata have separate records where their query and update semantics require them.
+`internal/app` routes live and history events through the message parser and persistence layer. Message upserts use `(chat_jid, msg_id)` identities so replay does not create duplicate messages. Status broadcasts have their own table, and status mutes mirrored from app state have theirs. Location, poll, star, and call metadata have separate records where their query and update semantics require them.
 
 Follow mode handles connection loss and bounded reconnection. One-shot sync waits for idle and drains queued media on successful completion. Context cancellation bounds network operations; follow-mode shutdown can send final unavailable presence before closing its detached socket.
 

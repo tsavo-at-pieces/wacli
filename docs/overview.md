@@ -30,7 +30,8 @@ Read when: you need the user-facing command map, global flags, store model, or l
 - [accounts](accounts.md) - create and select named account stores.
 - [sync](sync.md) - sync messages, contacts, groups, channels, and optional media.
 - [messages](messages.md) - list, search, show, and contextualize stored messages.
-- [calls](calls.md) - list stored WhatsApp call events.
+- [calls](calls.md) - list stored WhatsApp call events and reject ringing calls.
+- [status](status.md) - read and download synced status updates, mute a contact's status, and show status privacy.
 - [send](send.md) - send text, files, stickers, statuses, replies, and reactions.
 - [media](media.md) - download media attached to stored messages and transcribe voice notes locally.
 - [contacts](contacts.md) - search contacts and manage local aliases/tags.
@@ -38,7 +39,7 @@ Read when: you need the user-facing command map, global flags, store model, or l
 - [chats](chats.md) - list, show, filter, and manage known chat state.
 - [groups](groups.md) - refresh, inspect, rename, leave, join, invite, and manage participants.
 - [store](store.md) - inspect local store stats and prune stale local rows.
-- [channels](channels.md) - list, inspect, join, leave, and send to WhatsApp Channels.
+- [channels](channels.md) - list, inspect, join, leave, mute, read, react to, create, and send to WhatsApp Channels.
 - [history](history.md) - inspect archive coverage and request older per-chat history from the primary device.
 - [presence](presence.md) - send typing/paused indicators.
 - [profile](profile.md) - manage profile picture, About text, display name, and fetch profile metadata.
