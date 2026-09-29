@@ -11,6 +11,7 @@ import (
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/appstate"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waCompanionReg"
 	waStore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/types"
 	"google.golang.org/protobuf/proto"
@@ -320,5 +321,48 @@ func TestBestContactName(t *testing.T) {
 	}
 	if BestContactName(types.ContactInfo{Found: true, PushName: "Push"}) != "Push" {
 		t.Fatalf("expected push name")
+	}
+}
+
+func TestRequestFullHistorySync(t *testing.T) {
+	saved := proto.Clone(waStore.DeviceProps).(*waCompanionReg.DeviceProps)
+	t.Cleanup(func() { waStore.DeviceProps = saved })
+	waStore.DeviceProps = proto.Clone(saved).(*waCompanionReg.DeviceProps)
+
+	if waStore.DeviceProps.GetRequireFullSync() {
+		t.Fatal("whatsmeow default should not require a full sync")
+	}
+	inline := waStore.DeviceProps.GetHistorySyncConfig().GetInlineInitialPayloadInE2EeMsg()
+
+	RequestFullHistorySync()
+
+	props := waStore.DeviceProps
+	if !props.GetRequireFullSync() {
+		t.Fatal("RequireFullSync = false, want true")
+	}
+	cfg := props.GetHistorySyncConfig()
+	if got := cfg.GetFullSyncDaysLimit(); got != fullHistorySyncDays {
+		t.Fatalf("FullSyncDaysLimit = %d, want %d", got, fullHistorySyncDays)
+	}
+	if got := cfg.GetFullSyncSizeMbLimit(); got != fullHistorySyncSizeMB {
+		t.Fatalf("FullSyncSizeMbLimit = %d, want %d", got, fullHistorySyncSizeMB)
+	}
+	if got := cfg.GetStorageQuotaMb(); got < fullHistorySyncSizeMB {
+		t.Fatalf("StorageQuotaMb = %d, want at least %d", got, fullHistorySyncSizeMB)
+	}
+	if got := cfg.GetInlineInitialPayloadInE2EeMsg(); got != inline {
+		t.Fatalf("InlineInitialPayloadInE2EeMsg changed to %v; other defaults must survive", got)
+	}
+}
+
+func TestRequestFullHistorySyncWithoutConfig(t *testing.T) {
+	saved := waStore.DeviceProps
+	t.Cleanup(func() { waStore.DeviceProps = saved })
+	waStore.DeviceProps = &waCompanionReg.DeviceProps{}
+
+	RequestFullHistorySync()
+
+	if got := waStore.DeviceProps.GetHistorySyncConfig().GetFullSyncDaysLimit(); got != fullHistorySyncDays {
+		t.Fatalf("FullSyncDaysLimit = %d, want %d", got, fullHistorySyncDays)
 	}
 }

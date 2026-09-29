@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	appPkg "github.com/openclaw/wacli/internal/app"
+	"github.com/spf13/cobra"
 )
 
 func TestAuthStatusPayloadIncludesLinkedJID(t *testing.T) {
@@ -318,5 +319,25 @@ func TestPhoneFromLinkedJID(t *testing.T) {
 	}
 	if got := phoneFromLinkedJID("not-a-jid"); got != "" {
 		t.Fatalf("phoneFromLinkedJID invalid = %q", got)
+	}
+}
+
+func TestAuthFullHistoryFlag(t *testing.T) {
+	for _, cmd := range []*cobra.Command{newAuthCmd(&rootFlags{}), newAccountsAddCmd(&rootFlags{})} {
+		flag := cmd.Flags().Lookup("full-history")
+		if flag == nil {
+			t.Fatalf("%s: expected --full-history flag", cmd.Name())
+		}
+		if flag.DefValue != "false" {
+			t.Fatalf("%s: full-history default = %q", cmd.Name(), flag.DefValue)
+		}
+	}
+
+	got, err := validateAuthOptions(&rootFlags{}, authOptions{qrFormat: "terminal", fullHistory: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.fullHistory {
+		t.Fatal("validated options dropped --full-history")
 	}
 }

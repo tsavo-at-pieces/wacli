@@ -7,7 +7,7 @@ Read when: pairing a store, checking auth state, logging out, or choosing QR vs 
 ## Commands
 
 ```bash
-wacli auth [--follow] [--idle-exit 30s] [--download-media] [--qr-format terminal|text] [--phone PHONE] [--events]
+wacli auth [--follow] [--idle-exit 30s] [--download-media] [--qr-format terminal|text] [--phone PHONE] [--full-history] [--events]
 wacli auth status
 wacli auth logout
 wacli --account work auth status
@@ -18,6 +18,7 @@ wacli --account work auth status
 - Default pairing prints a terminal QR code.
 - `--qr-format text` prints the raw QR payload for external renderers.
 - `--phone PHONE` uses WhatsApp phone-number pairing instead of QR pairing.
+- `--full-history` asks the primary device for its full history instead of the recent window (it sets `RequireFullSync` with a 3650-day, 100 GB limit in the pairing handshake). It only affects a new pairing; an already linked store keeps what it was paired with. The phone still decides how much history it sends.
 - Transient websocket drops before pairing completes are retried with a fresh QR/code.
 - Passkey-gated pairing is not yet supported. If WhatsApp requests passkey verification or confirmation, auth stops with an actionable error instead of continuing to rotate unusable QR codes.
 - After pairing, auth runs bootstrap sync until idle unless `--follow` is set.
@@ -33,6 +34,7 @@ wacli --account work auth status
 wacli auth
 wacli auth --qr-format text
 wacli auth --phone "+1 (234) 567-8900"
+wacli auth --full-history
 wacli auth --download-media
 wacli auth status --json
 wacli auth logout

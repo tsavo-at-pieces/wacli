@@ -12,12 +12,15 @@ import (
 	"go.mau.fi/whatsmeow"
 	"go.mau.fi/whatsmeow/appstate"
 	waProto "go.mau.fi/whatsmeow/binary/proto"
+	"go.mau.fi/whatsmeow/proto/waCompanionReg"
 	"go.mau.fi/whatsmeow/proto/waE2E"
 	"go.mau.fi/whatsmeow/proto/waHistorySync"
 	"go.mau.fi/whatsmeow/proto/waWeb"
+	wastore "go.mau.fi/whatsmeow/store"
 	"go.mau.fi/whatsmeow/store/sqlstore"
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
+	"google.golang.org/protobuf/proto"
 )
 
 type Options struct {
@@ -115,6 +118,31 @@ func (c *Client) SetAutoReconnect(enabled bool) (bool, bool) {
 	}
 	c.client.EnableAutoReconnect = enabled
 	return previous, true
+}
+
+// Limits sent with a full-history request. They match what mautrix-whatsapp
+// and whatsapp-mcp ask for; the primary device still decides what it sends.
+const (
+	fullHistorySyncDays   = 3650
+	fullHistorySyncSizeMB = 102400
+)
+
+// RequestFullHistorySync asks the primary device for its full message history
+// instead of the recent window whatsmeow requests by default. The request
+// travels in the pairing handshake, so it only affects a device that links
+// after this call: an already linked device keeps what it was paired with.
+func RequestFullHistorySync() {
+	wastore.DeviceProps.RequireFullSync = proto.Bool(true)
+	cfg := wastore.DeviceProps.GetHistorySyncConfig()
+	if cfg == nil {
+		cfg = &waCompanionReg.DeviceProps_HistorySyncConfig{}
+		wastore.DeviceProps.HistorySyncConfig = cfg
+	}
+	cfg.FullSyncDaysLimit = proto.Uint32(fullHistorySyncDays)
+	cfg.FullSyncSizeMbLimit = proto.Uint32(fullHistorySyncSizeMB)
+	if cfg.GetStorageQuotaMb() < fullHistorySyncSizeMB {
+		cfg.StorageQuotaMb = proto.Uint32(fullHistorySyncSizeMB)
+	}
 }
 
 type ConnectOptions struct {

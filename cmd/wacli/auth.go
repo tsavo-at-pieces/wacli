@@ -22,11 +22,13 @@ type authOptions struct {
 	downloadMedia bool
 	qrFormat      string
 	phone         string
+	fullHistory   bool
 }
 
 type validatedAuthOptions struct {
-	qrFormat  string
-	pairPhone string
+	qrFormat    string
+	pairPhone   string
+	fullHistory bool
 }
 
 func newAuthCmd(flags *rootFlags) *cobra.Command {
@@ -67,6 +69,7 @@ func addAuthFlags(cmd *cobra.Command, opts *authOptions) {
 	cmd.Flags().BoolVar(&opts.downloadMedia, "download-media", false, "download media in the background during sync")
 	cmd.Flags().StringVar(&opts.qrFormat, "qr-format", "terminal", "QR output format: terminal or text")
 	cmd.Flags().StringVar(&opts.phone, "phone", "", "pair by phone number instead of QR code")
+	cmd.Flags().BoolVar(&opts.fullHistory, "full-history", false, "ask the phone for its full history while pairing (new pairings only; the phone decides how much it sends)")
 }
 
 func runAuth(flags *rootFlags, opts authOptions) (appPkg.SyncResult, error) {
@@ -80,6 +83,10 @@ func runAuth(flags *rootFlags, opts authOptions) (appPkg.SyncResult, error) {
 	maxMessages, maxDBSize, err := resolveSyncStorageLimits(syncStorageLimitFlags{})
 	if err != nil {
 		return appPkg.SyncResult{}, err
+	}
+	if validated.fullHistory {
+		// Pairing carries the request, so it must be set before the handshake.
+		wa.RequestFullHistorySync()
 	}
 	ctx, stop := signalContextWithEvents(out.NewEventWriter(os.Stderr, flags.events))
 	defer stop()
@@ -129,7 +136,7 @@ func validateAuthOptions(flags *rootFlags, opts authOptions) (validatedAuthOptio
 	if err != nil {
 		return validatedAuthOptions{}, err
 	}
-	return validatedAuthOptions{qrFormat: qrFormat, pairPhone: pairPhone}, nil
+	return validatedAuthOptions{qrFormat: qrFormat, pairPhone: pairPhone, fullHistory: opts.fullHistory}, nil
 }
 
 func normalizePairPhone(phone string) (string, error) {
