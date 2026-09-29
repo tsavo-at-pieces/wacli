@@ -89,6 +89,13 @@ type sendDelegateRequest struct {
 	Groups        []string `json:"groups,omitempty"`
 	PruneDays     int      `json:"prune_days,omitempty"`
 	IncludeActive bool     `json:"include_active,omitempty"`
+	// Status, channel and call kinds.
+	BackgroundColor string `json:"background_color,omitempty"`
+	Font            *int32 `json:"font,omitempty"`
+	ServerIDs       []int  `json:"server_ids,omitempty"`
+	Count           int    `json:"count,omitempty"`
+	BeforeServerID  int    `json:"before_server_id,omitempty"`
+	Description     string `json:"description,omitempty"`
 }
 
 type sendDelegateResponse struct {
@@ -117,8 +124,8 @@ type sendDelegateResponse struct {
 	Link         string          `json:"link,omitempty"`
 	Count        int             `json:"count,omitempty"`
 	DeletedMedia bool            `json:"deleted_media,omitempty"`
-	// Result carries a group command's own result, encoded as its direct run
-	// prints it with --json (send_ipc_groups.go).
+	// Result carries a management kind's own result (group, status, channel or
+	// call), encoded from the same value the direct command prints with --json.
 	Result json.RawMessage `json:"result,omitempty"`
 }
 

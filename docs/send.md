@@ -85,7 +85,8 @@ wacli polls list [--chat RECIPIENT] [--limit N] [--json]
 - Text statuses accept `--background-color` as `#RRGGBB` or `#AARRGGBB`.
 - Text statuses accept `--font N` to pass a WhatsApp text status font number.
 - Media statuses reuse the normal upload path, including MIME detection and `--mime` overrides.
-- Sent and synced statuses are stored in the local `status_messages` table, separate from normal chat `messages`.
+- Sent and synced statuses are stored in the local `status_messages` table, separate from normal chat `messages`. Read them with [`wacli status`](status.md).
+- `send status` is delegated to a running `sync --follow` like the other sends; `--file` is passed as an absolute path.
 
 ## Locations
 

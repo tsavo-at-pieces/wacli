@@ -115,6 +115,12 @@ type WAClient interface {
 	// Status, channel and call management.
 	MuteUserStatus(ctx context.Context, target types.JID, mute bool, beforeApply func()) ([]any, error)
 	GetStatusPrivacy(ctx context.Context) ([]types.StatusPrivacy, error)
+	NewsletterToggleMute(ctx context.Context, jid types.JID, mute bool) error
+	NewsletterSendReaction(ctx context.Context, jid types.JID, serverID types.MessageServerID, reaction string) (types.MessageID, error)
+	GetNewsletterMessages(ctx context.Context, jid types.JID, count int, before types.MessageServerID) ([]*types.NewsletterMessage, error)
+	NewsletterMarkViewed(ctx context.Context, jid types.JID, serverIDs []types.MessageServerID) error
+	CreateNewsletter(ctx context.Context, name, description string) (*types.NewsletterMetadata, error)
+	RejectCall(ctx context.Context, from types.JID, callID string) error
 }
 
 type Options struct {

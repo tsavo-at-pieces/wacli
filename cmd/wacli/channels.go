@@ -22,7 +22,38 @@ func newChannelsCmd(flags *rootFlags) *cobra.Command {
 	cmd.AddCommand(newChannelsInfoCmd(flags))
 	cmd.AddCommand(newChannelsJoinCmd(flags))
 	cmd.AddCommand(newChannelsLeaveCmd(flags))
+	cmd.AddCommand(newChannelsMuteCmd(flags, true))
+	cmd.AddCommand(newChannelsMuteCmd(flags, false))
+	cmd.AddCommand(newChannelsReactCmd(flags))
+	cmd.AddCommand(newChannelsMessagesCmd(flags))
+	cmd.AddCommand(newChannelsMarkViewedCmd(flags))
+	cmd.AddCommand(newChannelsCreateCmd(flags))
 	return cmd
+}
+
+// runChannelCommand runs a live channel command directly, or in a same-store
+// `sync --follow` that holds the lock. direct runs connected; delegated prints
+// the sync process's reply.
+func runChannelCommand(flags *rootFlags, req sendDelegateRequest, direct func(context.Context, waStoreApp) error, delegated func(sendDelegateResponse) error) error {
+	if err := flags.requireWritable(); err != nil {
+		return err
+	}
+	ctx, cancel := withTimeout(context.Background(), flags)
+	defer cancel()
+
+	a, lk, err := newApp(ctx, flags, true, false)
+	if err != nil {
+		return delegateAfterOpenFailure(ctx, flags, err, req, delegated)
+	}
+	defer closeApp(a, lk)
+
+	if err := a.EnsureAuthed(ctx); err != nil {
+		return err
+	}
+	if err := a.Connect(ctx, false, nil); err != nil {
+		return err
+	}
+	return direct(ctx, a)
 }
 
 func newChannelsListCmd(flags *rootFlags) *cobra.Command {
@@ -30,56 +61,60 @@ func newChannelsListCmd(flags *rootFlags) *cobra.Command {
 		Use:   "list",
 		Short: "List subscribed channels (live) and update local chats",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			if err := flags.requireWritable(); err != nil {
-				return err
-			}
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-
-			list, err := a.WA().GetSubscribedNewsletters(ctx)
-			if err != nil {
-				return err
-			}
-			rows := channelRecords(list)
-			if err := persistChannelRecords(a.DB(), rows); err != nil {
-				return err
-			}
-
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, rows)
-			}
-
-			w := newTableWriter(os.Stdout)
-			fmt.Fprintln(w, "NAME\tJID\tROLE\tSTATE\tSUBSCRIBERS\tDESCRIPTION")
-			fullOutput := fullTableOutput(flags.fullOutput)
-			for _, row := range rows {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n",
-					tableCell(row.Name, 40, fullOutput),
-					row.JID,
-					row.Role,
-					row.State,
-					row.Subscribers,
-					tableCell(strings.ReplaceAll(row.Description, "\n", " "), 50, fullOutput),
-				)
-			}
-			_ = w.Flush()
-			return nil
+			return runChannelCommand(flags, sendDelegateRequest{Kind: channelsListKind}, func(ctx context.Context, a waStoreApp) error {
+				rows, err := listChannels(ctx, a)
+				if err != nil {
+					return err
+				}
+				return writeChannelsList(flags, rows)
+			}, func(resp sendDelegateResponse) error {
+				var rows []channelRecord
+				if err := decodeDelegatedResult(resp, &rows); err != nil {
+					return err
+				}
+				return writeChannelsList(flags, rows)
+			})
 		},
 	}
 	return cmd
+}
+
+// listChannels fetches subscribed channels and stores them as chats.
+func listChannels(ctx context.Context, a waStoreApp) ([]channelRecord, error) {
+	list, err := a.WA().GetSubscribedNewsletters(ctx)
+	if err != nil {
+		return nil, err
+	}
+	rows := channelRecords(list)
+	if err := persistChannelRecords(a.DB(), rows); err != nil {
+		return nil, err
+	}
+	return rows, nil
+}
+
+func writeChannelsList(flags *rootFlags, rows []channelRecord) error {
+	if rows == nil {
+		rows = []channelRecord{}
+	}
+	if flags.asJSON {
+		return out.WriteJSON(os.Stdout, rows)
+	}
+
+	w := newTableWriter(os.Stdout)
+	fmt.Fprintln(w, "NAME\tJID\tROLE\tSTATE\tSUBSCRIBERS\tDESCRIPTION")
+	fullOutput := fullTableOutput(flags.fullOutput)
+	for _, row := range rows {
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%s\n",
+			tableCell(row.Name, 40, fullOutput),
+			row.JID,
+			row.Role,
+			row.State,
+			row.Subscribers,
+			tableCell(strings.ReplaceAll(row.Description, "\n", " "), 50, fullOutput),
+		)
+	}
+	_ = w.Flush()
+	return nil
 }
 
 func newChannelsInfoCmd(flags *rootFlags) *cobra.Command {
@@ -91,60 +126,61 @@ func newChannelsInfoCmd(flags *rootFlags) *cobra.Command {
 			if strings.TrimSpace(jidStr) == "" {
 				return fmt.Errorf("--jid is required")
 			}
-			if err := flags.requireWritable(); err != nil {
-				return err
-			}
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-
-			jid, err := parseChannelJID(jidStr)
-			if err != nil {
-				return err
-			}
-			meta, err := a.WA().GetNewsletterInfo(ctx, jid)
-			if err != nil {
-				return err
-			}
-			if meta == nil {
-				return fmt.Errorf("channel not found")
-			}
-			row := channelRecordFromMeta(meta)
-			if err := persistChannelRecords(a.DB(), []channelRecord{row}); err != nil {
-				return err
-			}
-
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, row)
-			}
-
-			fmt.Fprintf(os.Stdout, "JID: %s\nName: %s\nDescription: %s\nState: %s\nSubscribers: %d\n",
-				sanitize(row.JID),
-				sanitize(row.Name),
-				sanitize(row.Description),
-				sanitize(row.State),
-				row.Subscribers,
-			)
-			if row.Role != "" {
-				fmt.Fprintf(os.Stdout, "Role: %s\nMute: %s\n", sanitize(row.Role), sanitize(row.Mute))
-			}
-			return nil
+			return runChannelCommand(flags, sendDelegateRequest{Kind: channelInfoKind, To: jidStr}, func(ctx context.Context, a waStoreApp) error {
+				row, err := fetchChannelInfo(ctx, a, jidStr)
+				if err != nil {
+					return err
+				}
+				return writeChannelInfo(flags, row)
+			}, func(resp sendDelegateResponse) error {
+				var row channelRecord
+				if err := decodeDelegatedResult(resp, &row); err != nil {
+					return err
+				}
+				return writeChannelInfo(flags, row)
+			})
 		},
 	}
 	cmd.Flags().StringVar(&jidStr, "jid", "", "channel JID (...@newsletter)")
 	return cmd
+}
+
+// fetchChannelInfo fetches one channel's metadata and stores it as a chat.
+func fetchChannelInfo(ctx context.Context, a waStoreApp, rawJID string) (channelRecord, error) {
+	jid, err := parseChannelJID(rawJID)
+	if err != nil {
+		return channelRecord{}, err
+	}
+	meta, err := a.WA().GetNewsletterInfo(ctx, jid)
+	if err != nil {
+		return channelRecord{}, err
+	}
+	if meta == nil {
+		return channelRecord{}, fmt.Errorf("channel not found")
+	}
+	row := channelRecordFromMeta(meta)
+	if err := persistChannelRecords(a.DB(), []channelRecord{row}); err != nil {
+		return channelRecord{}, err
+	}
+	return row, nil
+}
+
+func writeChannelInfo(flags *rootFlags, row channelRecord) error {
+	if flags.asJSON {
+		return out.WriteJSON(os.Stdout, row)
+	}
+
+	fmt.Fprintf(os.Stdout, "JID: %s\nName: %s\nDescription: %s\nState: %s\nSubscribers: %d\n",
+		sanitize(row.JID),
+		sanitize(row.Name),
+		sanitize(row.Description),
+		sanitize(row.State),
+		row.Subscribers,
+	)
+	if row.Role != "" {
+		fmt.Fprintf(os.Stdout, "Role: %s\nMute: %s\n", sanitize(row.Role), sanitize(row.Mute))
+	}
+	return nil
 }
 
 func newChannelsJoinCmd(flags *rootFlags) *cobra.Command {
@@ -156,49 +192,54 @@ func newChannelsJoinCmd(flags *rootFlags) *cobra.Command {
 			if strings.TrimSpace(invite) == "" {
 				return fmt.Errorf("--invite is required")
 			}
-			if err := flags.requireWritable(); err != nil {
-				return err
-			}
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-
-			meta, err := a.WA().GetNewsletterInfoWithInvite(ctx, strings.TrimSpace(invite))
-			if err != nil {
-				return err
-			}
-			if meta == nil {
-				return fmt.Errorf("could not resolve channel from invite")
-			}
-			if err := a.WA().FollowNewsletter(ctx, meta.ID); err != nil {
-				return err
-			}
-			row := channelRecordFromMeta(meta)
-			if err := persistChannelRecords(a.DB(), []channelRecord{row}); err != nil {
-				return err
-			}
-
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"joined": true, "channel": row})
-			}
-			fmt.Fprintf(os.Stdout, "Joined channel %s (%s).\n", sanitize(row.Name), sanitize(row.JID))
-			return nil
+			return runChannelCommand(flags, sendDelegateRequest{Kind: channelJoinKind, InviteCode: invite}, func(ctx context.Context, a waStoreApp) error {
+				row, err := joinChannel(ctx, a, invite)
+				if err != nil {
+					return err
+				}
+				return writeChannelJoined(flags, row)
+			}, func(resp sendDelegateResponse) error {
+				var row channelRecord
+				if err := decodeDelegatedResult(resp, &row); err != nil {
+					return err
+				}
+				return writeChannelJoined(flags, row)
+			})
 		},
 	}
 	cmd.Flags().StringVar(&invite, "invite", "", "invite link or code, e.g. https://whatsapp.com/channel/...")
 	return cmd
+}
+
+// joinChannel follows the channel an invite names and stores it as a chat.
+func joinChannel(ctx context.Context, a waStoreApp, invite string) (channelRecord, error) {
+	invite = strings.TrimSpace(invite)
+	if invite == "" {
+		return channelRecord{}, fmt.Errorf("--invite is required")
+	}
+	meta, err := a.WA().GetNewsletterInfoWithInvite(ctx, invite)
+	if err != nil {
+		return channelRecord{}, err
+	}
+	if meta == nil {
+		return channelRecord{}, fmt.Errorf("could not resolve channel from invite")
+	}
+	if err := a.WA().FollowNewsletter(ctx, meta.ID); err != nil {
+		return channelRecord{}, err
+	}
+	row := channelRecordFromMeta(meta)
+	if err := persistChannelRecords(a.DB(), []channelRecord{row}); err != nil {
+		return channelRecord{}, err
+	}
+	return row, nil
+}
+
+func writeChannelJoined(flags *rootFlags, row channelRecord) error {
+	if flags.asJSON {
+		return out.WriteJSON(os.Stdout, map[string]any{"joined": true, "channel": row})
+	}
+	fmt.Fprintf(os.Stdout, "Joined channel %s (%s).\n", sanitize(row.Name), sanitize(row.JID))
+	return nil
 }
 
 func newChannelsLeaveCmd(flags *rootFlags) *cobra.Command {
@@ -210,42 +251,38 @@ func newChannelsLeaveCmd(flags *rootFlags) *cobra.Command {
 			if strings.TrimSpace(jidStr) == "" {
 				return fmt.Errorf("--jid is required")
 			}
-			if err := flags.requireWritable(); err != nil {
-				return err
-			}
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-
-			jid, err := parseChannelJID(jidStr)
-			if err != nil {
-				return err
-			}
-			if err := a.WA().UnfollowNewsletter(ctx, jid); err != nil {
-				return err
-			}
-
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"left": true, "jid": jid.String()})
-			}
-			fmt.Fprintf(os.Stdout, "Left channel %s.\n", jid.String())
-			return nil
+			return runChannelCommand(flags, sendDelegateRequest{Kind: channelLeaveKind, To: jidStr}, func(ctx context.Context, a waStoreApp) error {
+				jid, err := leaveChannel(ctx, a, jidStr)
+				if err != nil {
+					return err
+				}
+				return writeChannelLeft(flags, jid.String())
+			}, func(resp sendDelegateResponse) error {
+				return writeChannelLeft(flags, resp.Chat)
+			})
 		},
 	}
 	cmd.Flags().StringVar(&jidStr, "jid", "", "channel JID (...@newsletter)")
 	return cmd
+}
+
+func leaveChannel(ctx context.Context, a waStoreApp, rawJID string) (types.JID, error) {
+	jid, err := parseChannelJID(rawJID)
+	if err != nil {
+		return types.JID{}, err
+	}
+	if err := a.WA().UnfollowNewsletter(ctx, jid); err != nil {
+		return types.JID{}, err
+	}
+	return jid, nil
+}
+
+func writeChannelLeft(flags *rootFlags, jid string) error {
+	if flags.asJSON {
+		return out.WriteJSON(os.Stdout, map[string]any{"left": true, "jid": jid})
+	}
+	fmt.Fprintf(os.Stdout, "Left channel %s.\n", jid)
+	return nil
 }
 
 type channelRecord struct {

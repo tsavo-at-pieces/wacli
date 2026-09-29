@@ -83,6 +83,11 @@ func executeDelegatedManagement(ctx context.Context, a delegatedManagementApp, r
 		return executeDelegatedMessageRevoke(ctx, a, req)
 	case messageForwardKind:
 		return executeDelegatedMessageForward(ctx, a, req)
+	case statusSendKind, statusMuteKind, statusUnmuteKind, statusPrivacyKind,
+		channelsListKind, channelInfoKind, channelJoinKind, channelLeaveKind,
+		channelMuteKind, channelUnmuteKind, channelReactKind, channelMessagesKind,
+		channelMarkViewedKind, channelCreateKind, callRejectKind:
+		return executeDelegatedStatusChannelsCalls(ctx, a, req)
 	default:
 		if resp, ok, err := executeDelegatedGroupKind(ctx, a, req); ok {
 			return resp, err

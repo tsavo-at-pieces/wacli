@@ -16,9 +16,10 @@ import (
 func newCallsCmd(flags *rootFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "calls",
-		Short: "List WhatsApp call events from the local DB",
+		Short: "List WhatsApp call events and reject ringing calls",
 	}
 	cmd.AddCommand(newCallsListCmd(flags))
+	cmd.AddCommand(newCallsRejectCmd(flags))
 	return cmd
 }
 
