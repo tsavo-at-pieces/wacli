@@ -16,6 +16,11 @@ type ChatListFilter struct {
 	Pinned   *bool
 	Muted    *bool
 	Unread   *bool
+	Locked   *bool
+	// Deleted nil hides chats deleted on WhatsApp; true shows only them.
+	Deleted *bool
+	// JIDs restricts the list to these chats (for example a list's members).
+	JIDs []string
 }
 
 func (d *DB) UpsertChat(jid, kind, name string, lastTS time.Time) error {
@@ -53,8 +58,9 @@ func (d *DB) ListChatsFiltered(f ChatListFilter) ([]Chat, error) {
 	if f.Limit <= 0 {
 		f.Limit = 50
 	}
-	q := `SELECT jid, kind, COALESCE(name,''), COALESCE(last_message_ts,0), COALESCE(archived,0), COALESCE(pinned,0), COALESCE(muted_until,0), COALESCE(unread,0), COALESCE(unread_count,0) FROM chats WHERE 1=1`
+	q := `SELECT jid, kind, COALESCE(name,''), COALESCE(last_message_ts,0), COALESCE(archived,0), COALESCE(pinned,0), COALESCE(muted_until,0), COALESCE(unread,0), COALESCE(unread_count,0), COALESCE(locked,0), COALESCE(deleted_at,0), COALESCE(cleared_at,0) FROM chats WHERE 1=1`
 	var args []any
+	q, args = appendChatActionFilters(q, args, f)
 	if strings.TrimSpace(f.Query) != "" {
 		q += ` AND (LOWER(name) LIKE LOWER(?) ESCAPE '\' OR LOWER(jid) LIKE LOWER(?) ESCAPE '\')`
 		needle := likeContains(f.Query)
@@ -97,14 +103,16 @@ func (d *DB) ListChatsFiltered(f ChatListFilter) ([]Chat, error) {
 	for rows.Next() {
 		var c Chat
 		var ts int64
-		var archived, pinned, unread, unreadCount int
-		if err := rows.Scan(&c.JID, &c.Kind, &c.Name, &ts, &archived, &pinned, &c.MutedUntil, &unread, &unreadCount); err != nil {
+		var archived, pinned, unread, unreadCount, locked int
+		var deletedAt, clearedAt int64
+		if err := rows.Scan(&c.JID, &c.Kind, &c.Name, &ts, &archived, &pinned, &c.MutedUntil, &unread, &unreadCount, &locked, &deletedAt, &clearedAt); err != nil {
 			return nil, err
 		}
 		c.LastMessageTS = fromUnix(ts)
 		c.Archived = archived != 0
 		c.Pinned = pinned != 0
 		applyChatUnread(&c, unread, unreadCount)
+		applyChatExtras(&c, locked, deletedAt, clearedAt)
 		out = append(out, c)
 	}
 	return out, rows.Err()
@@ -115,7 +123,11 @@ func (d *DB) GetChat(jid string) (Chat, error) {
 	if err != nil {
 		return Chat{}, err
 	}
-	return chatFromRow(row), nil
+	c := chatFromRow(row)
+	if err := d.chatExtras(&c); err != nil {
+		return Chat{}, err
+	}
+	return c, nil
 }
 
 func (d *DB) SetChatArchived(jid string, archived bool) error {

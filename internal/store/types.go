@@ -18,6 +18,12 @@ type Chat struct {
 	MutedUntil    int64     `json:"muted_until"`
 	Unread        bool      `json:"unread"`
 	UnreadCount   int       `json:"unread_count"`
+	Locked        bool      `json:"locked"`
+	// DeletedAt is set while the chat is deleted on WhatsApp: its messages up
+	// to that time are tombstones and no newer message has arrived.
+	DeletedAt *time.Time `json:"deleted_at,omitempty"`
+	// ClearedAt is the newest clear-chat boundary.
+	ClearedAt *time.Time `json:"cleared_at,omitempty"`
 }
 
 func (c Chat) Muted() bool {
