@@ -39,7 +39,9 @@ type MediaRetryResult struct {
 
 // RetryMediaOptions controls a media-retry run.
 type RetryMediaOptions struct {
-	ChatJID    string        // scope to a single chat (optional)
+	ChatJID    string        // scope to a single chat (optional; required with MsgID)
+	MsgID      string        // retry exactly this message in ChatJID (optional)
+	MediaTypes []string      // only retry these media types (optional; see store.PendingMediaFilter)
 	BeforeUnix int64         // only retry media older than this unix time (optional)
 	BeforeSet  bool          // distinguish an explicit Unix epoch filter from no filter
 	Limit      int           // cap total messages to retry (0 = all pending)
@@ -85,15 +87,9 @@ func (a *App) RetryMedia(ctx context.Context, opts RetryMediaOptions) (MediaRetr
 		opts.Wait = 30 * time.Second
 	}
 
-	var pending []store.PendingMediaDownload
-	var err error
-	if opts.BeforeSet || opts.BeforeUnix != 0 {
-		pending, err = a.db.ListPendingMediaBefore(ctx, opts.ChatJID, opts.BeforeUnix, opts.Limit)
-	} else {
-		pending, err = a.db.ListPendingMediaDownloads(ctx, opts.ChatJID, opts.Limit)
-	}
+	pending, err := a.selectRetryMedia(ctx, opts)
 	if err != nil {
-		return MediaRetryResult{}, fmt.Errorf("list pending media: %w", err)
+		return MediaRetryResult{}, err
 	}
 	result := MediaRetryResult{Requested: len(pending)}
 	if len(pending) == 0 {
