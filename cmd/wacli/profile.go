@@ -13,8 +13,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/openclaw/wacli/internal/app"
-	"github.com/openclaw/wacli/internal/lock"
 	"github.com/openclaw/wacli/internal/out"
 	"github.com/openclaw/wacli/internal/wa"
 	"github.com/spf13/cobra"
@@ -55,33 +53,18 @@ func newProfileSetPictureCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return fmt.Errorf("read image: %w", err)
 			}
-
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-
-			if err := a.EnsureAuthed(ctx); err != nil {
-				return err
-			}
-			if err := a.Connect(ctx, false, nil); err != nil {
-				return err
-			}
-
-			pictureID, err := a.WA().SetProfilePicture(ctx, imgBytes)
-			if err != nil {
-				return fmt.Errorf("set profile picture: %w", err)
-			}
-
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"picture_id": pictureID})
-			}
-			fmt.Fprintf(os.Stdout, "Profile picture updated (id: %s)\n", pictureID)
-			return nil
+			return delegatedCommand[profilePictureResult]{
+				req:  sendDelegateRequest{Kind: profileSetPictureKind, ImageJPEG: imgBytes},
+				live: true,
+				op:   setProfilePicture,
+				write: func(res profilePictureResult) error {
+					if flags.asJSON {
+						return out.WriteJSON(os.Stdout, map[string]any{"picture_id": res.PictureID})
+					}
+					fmt.Fprintf(os.Stdout, "Profile picture updated (id: %s)\n", res.PictureID)
+					return nil
+				},
+			}.run(flags)
 		},
 	}
 	return cmd
@@ -96,21 +79,18 @@ func newProfileRemovePictureCmd(flags *rootFlags) *cobra.Command {
 			if err := flags.requireWritable(); err != nil {
 				return err
 			}
-			ctx, cancel, a, lk, err := openLiveProfileApp(flags, true)
-			if err != nil {
-				return err
-			}
-			defer cancel()
-			defer closeApp(a, lk)
-			pictureID, err := a.WA().SetProfilePicture(ctx, nil)
-			if err != nil {
-				return fmt.Errorf("remove profile picture: %w", err)
-			}
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"removed": true, "picture_id": pictureID})
-			}
-			fmt.Fprintln(os.Stdout, "Profile picture removed.")
-			return nil
+			return delegatedCommand[profilePictureResult]{
+				req:  sendDelegateRequest{Kind: profileRemovePictureKind},
+				live: true,
+				op:   removeProfilePicture,
+				write: func(res profilePictureResult) error {
+					if flags.asJSON {
+						return out.WriteJSON(os.Stdout, map[string]any{"removed": true, "picture_id": res.PictureID})
+					}
+					fmt.Fprintln(os.Stdout, "Profile picture removed.")
+					return nil
+				},
+			}.run(flags)
 		},
 	}
 	return cmd
@@ -129,20 +109,18 @@ func newProfileSetAboutCmd(flags *rootFlags) *cobra.Command {
 			if about == "" {
 				return fmt.Errorf("about text is required")
 			}
-			ctx, cancel, a, lk, err := openLiveProfileApp(flags, true)
-			if err != nil {
-				return err
-			}
-			defer cancel()
-			defer closeApp(a, lk)
-			if err := a.WA().SetStatusMessage(ctx, about); err != nil {
-				return fmt.Errorf("set profile about: %w", err)
-			}
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"about": about})
-			}
-			fmt.Fprintln(os.Stdout, "Profile About updated.")
-			return nil
+			return delegatedCommand[profileAboutSetResult]{
+				req:  sendDelegateRequest{Kind: profileSetAboutKind, Message: about},
+				live: true,
+				op:   setProfileAbout,
+				write: func(res profileAboutSetResult) error {
+					if flags.asJSON {
+						return out.WriteJSON(os.Stdout, res)
+					}
+					fmt.Fprintln(os.Stdout, "Profile About updated.")
+					return nil
+				},
+			}.run(flags)
 		},
 	}
 	return cmd
@@ -161,20 +139,18 @@ func newProfileSetNameCmd(flags *rootFlags) *cobra.Command {
 			if name == "" {
 				return fmt.Errorf("profile name is required")
 			}
-			ctx, cancel, a, lk, err := openLiveProfileApp(flags, true)
-			if err != nil {
-				return err
-			}
-			defer cancel()
-			defer closeApp(a, lk)
-			if err := a.WA().SetProfileName(ctx, name); err != nil {
-				return fmt.Errorf("set profile name: %w", err)
-			}
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"name": name})
-			}
-			fmt.Fprintln(os.Stdout, "Profile name updated.")
-			return nil
+			return delegatedCommand[profileNameResult]{
+				req:  sendDelegateRequest{Kind: profileSetNameKind, Name: name},
+				live: true,
+				op:   setProfileName,
+				write: func(res profileNameResult) error {
+					if flags.asJSON {
+						return out.WriteJSON(os.Stdout, res)
+					}
+					fmt.Fprintln(os.Stdout, "Profile name updated.")
+					return nil
+				},
+			}.run(flags)
 		},
 	}
 	return cmd
@@ -191,30 +167,25 @@ func newProfilePictureInfoCmd(flags *rootFlags) *cobra.Command {
 			if err := flags.requireWritable(); err != nil {
 				return err
 			}
-			target, err := parseProfileTarget(targetRaw)
-			if err != nil {
+			if _, err := parseProfileTarget(targetRaw); err != nil {
 				return err
 			}
-			ctx, cancel, a, lk, err := openLiveProfileApp(flags, true)
-			if err != nil {
-				return err
-			}
-			defer cancel()
-			defer closeApp(a, lk)
-			info, err := a.WA().GetProfilePictureInfo(ctx, target, preview, existingID)
-			if err != nil {
-				return fmt.Errorf("get profile picture info: %w", err)
-			}
-			output := formatProfilePictureInfo(target, info)
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, output)
-			}
-			if info == nil {
-				fmt.Fprintf(os.Stdout, "%s profile picture is unchanged.\n", sanitize(target.String()))
-				return nil
-			}
-			fmt.Fprintf(os.Stdout, "JID: %s\nID: %s\nType: %s\nURL: %s\nDirect path: %s\n", sanitize(output.JID), sanitize(output.ID), sanitize(output.Type), sanitize(output.URL), sanitize(output.DirectPath))
-			return nil
+			return delegatedCommand[profilePictureInfoOutput]{
+				req:  sendDelegateRequest{Kind: profilePictureInfoKind, To: targetRaw, Preview: preview, ID: existingID},
+				live: true,
+				op:   fetchProfilePictureInfo,
+				write: func(output profilePictureInfoOutput) error {
+					if flags.asJSON {
+						return out.WriteJSON(os.Stdout, output)
+					}
+					if output.Unchanged {
+						fmt.Fprintf(os.Stdout, "%s profile picture is unchanged.\n", sanitize(output.JID))
+						return nil
+					}
+					fmt.Fprintf(os.Stdout, "JID: %s\nID: %s\nType: %s\nURL: %s\nDirect path: %s\n", sanitize(output.JID), sanitize(output.ID), sanitize(output.Type), sanitize(output.URL), sanitize(output.DirectPath))
+					return nil
+				},
+			}.run(flags)
 		},
 	}
 	cmd.Flags().StringVar(&targetRaw, "jid", "", "target JID or phone number")
@@ -233,25 +204,21 @@ func newProfileGetAboutCmd(flags *rootFlags) *cobra.Command {
 			if err := flags.requireWritable(); err != nil {
 				return err
 			}
-			target, err := parseProfileTarget(targetRaw)
-			if err != nil {
+			if _, err := parseProfileTarget(targetRaw); err != nil {
 				return err
 			}
-			ctx, cancel, a, lk, err := openLiveProfileApp(flags, true)
-			if err != nil {
-				return err
-			}
-			defer cancel()
-			defer closeApp(a, lk)
-			output, err := fetchProfileAbout(ctx, a.WA(), target)
-			if err != nil {
-				return fmt.Errorf("get profile about: %w", err)
-			}
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, output)
-			}
-			fmt.Fprintf(os.Stdout, "JID: %s\nAbout: %s\n", sanitize(output.JID), sanitize(output.About))
-			return nil
+			return delegatedCommand[profileAboutOutput]{
+				req:  sendDelegateRequest{Kind: profileGetAboutKind, To: targetRaw},
+				live: true,
+				op:   fetchTargetProfileAbout,
+				write: func(output profileAboutOutput) error {
+					if flags.asJSON {
+						return out.WriteJSON(os.Stdout, output)
+					}
+					fmt.Fprintf(os.Stdout, "JID: %s\nAbout: %s\n", sanitize(output.JID), sanitize(output.About))
+					return nil
+				},
+			}.run(flags)
 		},
 	}
 	cmd.Flags().StringVar(&targetRaw, "jid", "", "target JID or phone number")
@@ -268,50 +235,114 @@ func newProfileBusinessCmd(flags *rootFlags) *cobra.Command {
 			if err := flags.requireWritable(); err != nil {
 				return err
 			}
-			target, err := parseProfileTarget(targetRaw)
-			if err != nil {
+			if _, err := parseProfileTarget(targetRaw); err != nil {
 				return err
 			}
-			ctx, cancel, a, lk, err := openLiveProfileApp(flags, true)
-			if err != nil {
-				return err
-			}
-			defer cancel()
-			defer closeApp(a, lk)
-			profile, err := a.WA().GetBusinessProfile(ctx, target)
-			if err != nil {
-				return fmt.Errorf("get business profile: %w", err)
-			}
-			output := formatBusinessProfile(profile)
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, output)
-			}
-			fmt.Fprintf(os.Stdout, "JID: %s\nAddress: %s\nEmail: %s\nTimezone: %s\n", sanitize(output.JID), sanitize(output.Address), sanitize(output.Email), sanitize(output.BusinessHoursTimeZone))
-			return nil
+			return delegatedCommand[businessProfileOutput]{
+				req:  sendDelegateRequest{Kind: profileBusinessKind, To: targetRaw},
+				live: true,
+				op:   fetchBusinessProfile,
+				write: func(output businessProfileOutput) error {
+					if flags.asJSON {
+						return out.WriteJSON(os.Stdout, output)
+					}
+					fmt.Fprintf(os.Stdout, "JID: %s\nAddress: %s\nEmail: %s\nTimezone: %s\n", sanitize(output.JID), sanitize(output.Address), sanitize(output.Email), sanitize(output.BusinessHoursTimeZone))
+					return nil
+				},
+			}.run(flags)
 		},
 	}
 	cmd.Flags().StringVar(&targetRaw, "jid", "", "target JID or phone number")
 	return cmd
 }
 
-func openLiveProfileApp(flags *rootFlags, needLock bool) (context.Context, context.CancelFunc, *app.App, *lock.Lock, error) {
-	ctx, cancel := withTimeout(context.Background(), flags)
-	a, lk, err := newApp(ctx, flags, needLock, false)
+type profilePictureResult struct {
+	PictureID string `json:"picture_id"`
+}
+
+type profileAboutSetResult struct {
+	About string `json:"about"`
+}
+
+type profileNameResult struct {
+	Name string `json:"name"`
+}
+
+func setProfilePicture(ctx context.Context, a waStoreApp, req sendDelegateRequest) (profilePictureResult, error) {
+	if len(req.ImageJPEG) == 0 {
+		return profilePictureResult{}, fmt.Errorf("image is required")
+	}
+	pictureID, err := a.WA().SetProfilePicture(ctx, req.ImageJPEG)
 	if err != nil {
-		cancel()
-		return nil, nil, nil, nil, err
+		return profilePictureResult{}, fmt.Errorf("set profile picture: %w", err)
 	}
-	if err := a.EnsureAuthed(ctx); err != nil {
-		cancel()
-		closeApp(a, lk)
-		return nil, nil, nil, nil, err
+	return profilePictureResult{PictureID: pictureID}, nil
+}
+
+func removeProfilePicture(ctx context.Context, a waStoreApp, _ sendDelegateRequest) (profilePictureResult, error) {
+	pictureID, err := a.WA().SetProfilePicture(ctx, nil)
+	if err != nil {
+		return profilePictureResult{}, fmt.Errorf("remove profile picture: %w", err)
 	}
-	if err := a.Connect(ctx, false, nil); err != nil {
-		cancel()
-		closeApp(a, lk)
-		return nil, nil, nil, nil, err
+	return profilePictureResult{PictureID: pictureID}, nil
+}
+
+func setProfileAbout(ctx context.Context, a waStoreApp, req sendDelegateRequest) (profileAboutSetResult, error) {
+	about := strings.TrimSpace(req.Message)
+	if about == "" {
+		return profileAboutSetResult{}, fmt.Errorf("about text is required")
 	}
-	return ctx, cancel, a, lk, nil
+	if err := a.WA().SetStatusMessage(ctx, about); err != nil {
+		return profileAboutSetResult{}, fmt.Errorf("set profile about: %w", err)
+	}
+	return profileAboutSetResult{About: about}, nil
+}
+
+func setProfileName(ctx context.Context, a waStoreApp, req sendDelegateRequest) (profileNameResult, error) {
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		return profileNameResult{}, fmt.Errorf("profile name is required")
+	}
+	if err := a.WA().SetProfileName(ctx, name); err != nil {
+		return profileNameResult{}, fmt.Errorf("set profile name: %w", err)
+	}
+	return profileNameResult{Name: name}, nil
+}
+
+func fetchProfilePictureInfo(ctx context.Context, a waStoreApp, req sendDelegateRequest) (profilePictureInfoOutput, error) {
+	target, err := parseProfileTarget(req.To)
+	if err != nil {
+		return profilePictureInfoOutput{}, err
+	}
+	info, err := a.WA().GetProfilePictureInfo(ctx, target, req.Preview, req.ID)
+	if err != nil {
+		return profilePictureInfoOutput{}, fmt.Errorf("get profile picture info: %w", err)
+	}
+	return formatProfilePictureInfo(target, info), nil
+}
+
+func fetchTargetProfileAbout(ctx context.Context, a waStoreApp, req sendDelegateRequest) (profileAboutOutput, error) {
+	target, err := parseProfileTarget(req.To)
+	if err != nil {
+		return profileAboutOutput{}, err
+	}
+	output, err := fetchProfileAbout(ctx, a.WA(), target)
+	if err != nil {
+		return profileAboutOutput{}, fmt.Errorf("get profile about: %w", err)
+	}
+	return output, nil
+}
+
+func fetchBusinessProfile(ctx context.Context, a waStoreApp, req sendDelegateRequest) (businessProfileOutput, error) {
+	target, err := parseProfileTarget(req.To)
+	if err != nil {
+		return businessProfileOutput{}, err
+	}
+	profile, err := a.WA().GetBusinessProfile(ctx, target)
+	if err != nil {
+		return businessProfileOutput{}, fmt.Errorf("get business profile: %w", err)
+	}
+	return formatBusinessProfile(profile), nil
 }
 
 func parseProfileTarget(raw string) (types.JID, error) {

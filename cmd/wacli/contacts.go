@@ -14,7 +14,7 @@ import (
 func newContactsCmd(flags *rootFlags) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "contacts",
-		Short: "Search and manage local contact metadata",
+		Short: "Search contacts, manage local metadata and WhatsApp contacts",
 	}
 	cmd.AddCommand(newContactsSearchCmd(flags))
 	cmd.AddCommand(newContactsShowCmd(flags))
@@ -24,6 +24,11 @@ func newContactsCmd(flags *rootFlags) *cobra.Command {
 	cmd.AddCommand(newContactsImportSystemCmd(flags))
 	cmd.AddCommand(newContactsAliasCmd(flags))
 	cmd.AddCommand(newContactsTagsCmd(flags))
+	cmd.AddCommand(newContactsSaveCmd(flags))
+	cmd.AddCommand(newContactsDeleteCmd(flags))
+	cmd.AddCommand(newContactsBlockCmd(flags, true))
+	cmd.AddCommand(newContactsBlockCmd(flags, false))
+	cmd.AddCommand(newContactsBlocklistCmd(flags))
 	return cmd
 }
 
@@ -93,9 +98,13 @@ func newContactsShowCmd(flags *rootFlags) *cobra.Command {
 			if err != nil {
 				return err
 			}
+			blocked, err := contactShownBlocked(ctx, a, c.JID)
+			if err != nil {
+				return err
+			}
 
 			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, c)
+				return out.WriteJSON(os.Stdout, contactShowOutput{Contact: c, Blocked: blocked})
 			}
 
 			fmt.Fprintf(os.Stdout, "JID: %s\n", sanitize(c.JID))
@@ -117,6 +126,9 @@ func newContactsShowCmd(flags *rootFlags) *cobra.Command {
 					tags = append(tags, sanitize(tag))
 				}
 				fmt.Fprintf(os.Stdout, "Tags: %s\n", strings.Join(tags, ", "))
+			}
+			if blocked {
+				fmt.Fprintln(os.Stdout, "Blocked: yes")
 			}
 			return nil
 		},

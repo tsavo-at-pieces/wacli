@@ -96,6 +96,7 @@ func execute(args []string) error {
 	rootCmd.AddCommand(newHistoryCmd(&flags))
 	rootCmd.AddCommand(newPresenceCmd(&flags))
 	rootCmd.AddCommand(newProfileCmd(&flags))
+	rootCmd.AddCommand(newPrivacyCmd(&flags))
 	rootCmd.AddCommand(newDocsCmd(&flags))
 	rootCmd.AddCommand(newStoreCmd(&flags))
 

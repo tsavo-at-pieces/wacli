@@ -88,6 +88,12 @@ func executeDelegatedManagement(ctx context.Context, a delegatedManagementApp, r
 		channelMuteKind, channelUnmuteKind, channelReactKind, channelMessagesKind,
 		channelMarkViewedKind, channelCreateKind, callRejectKind:
 		return executeDelegatedStatusChannelsCalls(ctx, a, req)
+	case profileSetNameKind, profileSetAboutKind, profileSetPictureKind, profileRemovePictureKind,
+		profilePictureInfoKind, profileGetAboutKind, profileBusinessKind,
+		contactsCheckKind, contactsImportSystemKind, contactsImportSystemClearKind,
+		contactSaveKind, contactDeleteKind, contactBlockKind, contactUnblockKind, contactsBlocklistKind,
+		privacyShowKind, privacySetKind, privacyDisappearingDefaultKind, privacyStatusKind:
+		return executeDelegatedProfilePrivacy(ctx, a, req)
 	default:
 		if resp, ok, err := executeDelegatedGroupKind(ctx, a, req); ok {
 			return resp, err

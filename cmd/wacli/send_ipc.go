@@ -96,6 +96,19 @@ type sendDelegateRequest struct {
 	Count           int    `json:"count,omitempty"`
 	BeforeServerID  int    `json:"before_server_id,omitempty"`
 	Description     string `json:"description,omitempty"`
+
+	// Profile, privacy and WhatsApp-contact kinds. Profile about text travels
+	// in Message, a known picture ID in ID, a profile name in Name.
+	Preview           bool              `json:"preview,omitempty"`
+	ImageJPEG         []byte            `json:"image_jpeg,omitempty"`
+	Phones            []string          `json:"phones,omitempty"`
+	SystemNames       map[string]string `json:"system_names,omitempty"`
+	FirstName         string            `json:"first_name,omitempty"`
+	FullName          string            `json:"full_name,omitempty"`
+	SaveToPhone       bool              `json:"save_to_phone,omitempty"`
+	PrivacySetting    string            `json:"privacy_setting,omitempty"`
+	PrivacyValue      string            `json:"privacy_value,omitempty"`
+	DisappearingTimer string            `json:"disappearing_timer,omitempty"`
 }
 
 type sendDelegateResponse struct {
@@ -127,6 +140,11 @@ type sendDelegateResponse struct {
 	// Result carries a management kind's own result (group, status, channel or
 	// call), encoded from the same value the direct command prints with --json.
 	Result json.RawMessage `json:"result,omitempty"`
+	// Contacts carries contacts check results, as upstream's reply does.
+	Contacts []contactCheckResult `json:"contacts,omitempty"`
+	// Payload carries a profile, privacy or WhatsApp-contact result exactly
+	// as the direct command would print it with --json.
+	Payload json.RawMessage `json:"payload,omitempty"`
 }
 
 type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)

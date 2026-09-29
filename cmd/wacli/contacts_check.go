@@ -84,28 +84,30 @@ func runContactsCheck(flags *rootFlags, args []string) error {
 	if err := flags.requireWritable(); err != nil {
 		return err
 	}
+	return delegatedCommand[[]contactCheckResult]{
+		req:   sendDelegateRequest{Kind: contactsCheckKind, Phones: args},
+		live:  true,
+		op:    checkContactRegistrations,
+		write: func(results []contactCheckResult) error { return writeContactCheckResults(flags, results) },
+		decode: func(resp sendDelegateResponse) ([]contactCheckResult, error) {
+			return resp.Contacts, nil
+		},
+	}.run(flags)
+}
 
-	ctx, cancel := withTimeout(context.Background(), flags)
-	defer cancel()
-
-	a, lk, err := newApp(ctx, flags, true, false)
-	if err != nil {
-		return err
+// checkContactRegistrations is the contacts check core for the direct command
+// and the sync process.
+func checkContactRegistrations(ctx context.Context, a waStoreApp, req sendDelegateRequest) ([]contactCheckResult, error) {
+	if len(req.Phones) == 0 {
+		return nil, fmt.Errorf("at least one phone is required")
 	}
-	defer closeApp(a, lk)
+	return checkRegistrations(ctx, a.WA(), req.Phones)
+}
 
-	if err := a.EnsureAuthed(ctx); err != nil {
-		return err
+func writeContactCheckResults(flags *rootFlags, results []contactCheckResult) error {
+	if results == nil {
+		results = []contactCheckResult{}
 	}
-	if err := a.Connect(ctx, false, nil); err != nil {
-		return err
-	}
-
-	results, err := checkRegistrations(ctx, a.WA(), args)
-	if err != nil {
-		return err
-	}
-
 	if flags.asJSON {
 		return out.WriteJSON(os.Stdout, results)
 	}

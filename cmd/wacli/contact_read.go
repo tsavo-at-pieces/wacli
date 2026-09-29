@@ -262,3 +262,19 @@ func mergeDisplayContacts(primary, secondary store.Contact) store.Contact {
 	}
 	return primary
 }
+
+// contactShowOutput adds the locally known block state to a shown contact.
+type contactShowOutput struct {
+	store.Contact
+	Blocked bool `json:"blocked,omitempty"`
+}
+
+// contactShownBlocked reports whether either identity of a contact is on the
+// local copy of the WhatsApp block list.
+func contactShownBlocked(ctx context.Context, a *app.App, jid string) (bool, error) {
+	resolver, err := contactReadResolver(a)
+	if err != nil {
+		return false, err
+	}
+	return a.DB().AnyContactBlocked(contactIdentityJIDs(ctx, resolver, jid))
+}
