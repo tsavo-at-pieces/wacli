@@ -32,6 +32,10 @@ type transcribeDeps struct {
 	download func(ctx context.Context, info store.MediaDownloadInfo, target string) error
 	convert  func(ctx context.Context, ffmpeg, in, out string) error
 	now      func() time.Time
+	// recoverExpired asks a running same-store `sync --follow` to recover a
+	// message whose CDN copy expired (a single-message media retry) and
+	// returns the recovered file. nil = never try.
+	recoverExpired func(ctx context.Context, chatJID, msgID string) (string, error)
 	// tempRoot is where per-message private temp dirs are made ("" = the
 	// system temp dir).
 	tempRoot string
@@ -52,7 +56,11 @@ func defaultTranscribeDeps() transcribeDeps {
 }
 
 func newMediaTranscribeCmd(flags *rootFlags) *cobra.Command {
-	return newMediaTranscribeCmdWithDeps(flags, defaultTranscribeDeps())
+	deps := defaultTranscribeDeps()
+	deps.recoverExpired = func(ctx context.Context, chatJID, msgID string) (string, error) {
+		return recoverExpiredThroughSync(ctx, flags, chatJID, msgID)
+	}
+	return newMediaTranscribeCmdWithDeps(flags, deps)
 }
 
 type transcribeOptions struct {
@@ -235,9 +243,36 @@ func (t *transcriber) audioSource(ctx context.Context, db *store.DB, chatJID, ms
 	dctx, cancel := context.WithTimeout(ctx, transcribeDownloadTimeout)
 	defer cancel()
 	if err := t.deps.download(dctx, info, target); err != nil {
+		if app.IsExpiredMediaError(err) {
+			return t.recoverExpired(ctx, info, err)
+		}
 		return "", "", fmt.Errorf("download audio: %w", err)
 	}
 	return target, "download", nil
+}
+
+// recoverExpired handles audio whose CDN copy expired. A running same-store
+// `sync --follow` can ask the phone to re-upload it (a media retry for this
+// message), which records the recovered file in the store; the transcript is
+// made from that file. Without one, the error says how to recover it.
+func (t *transcriber) recoverExpired(ctx context.Context, info store.MediaDownloadInfo, downloadErr error) (string, string, error) {
+	retry := fmt.Sprintf("wacli media retry --chat %s --id %s", info.ChatJID, info.MsgID)
+	if t.deps.recoverExpired == nil {
+		return "", "", fmt.Errorf("download audio: %w; the media expired from WhatsApp's servers: run `%s` to ask the phone to re-upload it", downloadErr, retry)
+	}
+	path, err := t.deps.recoverExpired(ctx, info.ChatJID, info.MsgID)
+	switch {
+	case errors.Is(err, errSendDelegateUnavailable):
+		return "", "", fmt.Errorf("download audio: %w; the media expired from WhatsApp's servers and no `wacli sync --follow` is running to recover it: run `%s` to ask the phone to re-upload it, then transcribe again", downloadErr, retry)
+	case errors.Is(err, errRecoveryReadOnly):
+		return "", "", fmt.Errorf("download audio: %w; the media expired from WhatsApp's servers and %v: run `%s` without --read-only, then transcribe again", downloadErr, err, retry)
+	case err != nil:
+		return "", "", fmt.Errorf("download audio: %w; the media expired, and recovering it through the running sync process failed: %v", downloadErr, err)
+	}
+	if st, err := os.Stat(path); err != nil || !st.Mode().IsRegular() || st.Size() == 0 {
+		return "", "", fmt.Errorf("download audio: %w; the running sync process recovered the media to %s, but it cannot be read", downloadErr, path)
+	}
+	return path, "retry", nil
 }
 
 func localAudioFile(db *store.DB, chatJID, msgID string) (string, bool) {

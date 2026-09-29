@@ -20,6 +20,7 @@ import (
 	"github.com/openclaw/wacli/internal/transcribe"
 	"github.com/openclaw/wacli/internal/transcripts"
 	"github.com/spf13/cobra"
+	"go.mau.fi/whatsmeow"
 )
 
 // All identities and text below are fictional.
@@ -83,6 +84,9 @@ func (h *transcribeHarness) deps(t *testing.T) transcribeDeps {
 			if strings.Contains(info.DirectPath, "broken") {
 				return errors.New("fake CDN returned 403")
 			}
+			if strings.Contains(info.DirectPath, "expired") {
+				return fmt.Errorf("fake CDN: %w", whatsmeow.ErrMediaDownloadFailedWith403)
+			}
 			return os.WriteFile(target, []byte("fake-ogg-bytes"), 0o600)
 		},
 		convert: func(ctx context.Context, ffmpeg, in, out string) error {
@@ -129,7 +133,13 @@ var transcribeFixtureBase = time.Date(2026, 4, 1, 9, 0, 0, 0, time.UTC)
 // handles, plus non-audio messages.
 func newTranscribeHarness(t *testing.T) *transcribeHarness {
 	t.Helper()
-	storeDir := t.TempDir()
+	return newTranscribeHarnessAt(t, t.TempDir())
+}
+
+// newTranscribeHarnessAt seeds the store in storeDir, which may need to be
+// short enough for a delegate socket.
+func newTranscribeHarnessAt(t *testing.T, storeDir string) *transcribeHarness {
+	t.Helper()
 	db, err := store.Open(filepath.Join(storeDir, "wacli.db"))
 	if err != nil {
 		t.Fatalf("store.Open: %v", err)

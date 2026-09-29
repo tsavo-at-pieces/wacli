@@ -356,6 +356,13 @@ func (a *App) classifyRetry(ctx context.Context, info store.MediaDownloadInfo, i
 	return out
 }
 
+// IsExpiredMediaError reports whether a media download failed because the
+// CDN no longer serves the file (HTTP 403, 404 or 410), which a media retry
+// can recover while the phone still holds the media.
+func IsExpiredMediaError(err error) bool {
+	return isExpiredMediaDownload(err)
+}
+
 func isExpiredMediaDownload(err error) bool {
 	return errors.Is(err, whatsmeow.ErrMediaDownloadFailedWith403) ||
 		errors.Is(err, whatsmeow.ErrMediaDownloadFailedWith404) ||
