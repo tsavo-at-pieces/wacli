@@ -42,6 +42,7 @@ var schemaMigrations = []migration{
 	{version: 26, name: "message identity indexes and selective fts updates", up: migrateMessageIdentityIndexes},
 	{version: 27, name: "repair placeholder chat activity", up: migratePlaceholderChatActivity},
 	{version: 28, name: "status mutes", up: migrateStatusMutes},
+	{version: 29, name: "contact blocks", up: migrateContactBlocks},
 }
 
 func migratePlaceholderChatActivity(d *DB) error {

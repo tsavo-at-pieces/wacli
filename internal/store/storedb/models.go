@@ -57,6 +57,11 @@ type ContactAlias struct {
 	UpdatedAt int64
 }
 
+type ContactBlock struct {
+	Jid       string
+	BlockedAt int64
+}
+
 type ContactTag struct {
 	Jid       string
 	Tag       string
