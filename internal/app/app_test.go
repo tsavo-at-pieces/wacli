@@ -136,6 +136,54 @@ func TestReadOnlyLocalResolverReadsSessionLIDMap(t *testing.T) {
 	assertNoAppSQLiteSidecars(t, sessionPath)
 }
 
+// sync --follow keeps writing session.db while it serves delegated commands, so
+// each command needs a fresh resolver that reads under locks.
+func TestOpenSessionResolverIsFreshAndReadsUnderLocks(t *testing.T) {
+	storeDir := t.TempDir()
+	a, err := New(Options{StoreDir: storeDir})
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	defer a.Close()
+	sessionPath := filepath.Join(storeDir, "session.db")
+	writeSessionLIDMap(t, sessionPath, "100000000001", "15550000001")
+
+	first, err := a.OpenSessionResolver()
+	if err != nil {
+		t.Fatalf("OpenSessionResolver: %v", err)
+	}
+	pn := types.JID{User: "15550000001", Server: types.DefaultUserServer}
+	lid := types.JID{User: "100000000001", Server: types.HiddenUserServer}
+	if got := first.ResolvePNToLID(context.Background(), pn); got != lid {
+		t.Fatalf("ResolvePNToLID = %s, want %s", got, lid)
+	}
+	if err := first.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// A mapping learned after the first command is visible to the next one.
+	writer, err := sql.Open("sqlite3", sessionPath)
+	if err != nil {
+		t.Fatalf("open writer: %v", err)
+	}
+	defer writer.Close()
+	if _, err := writer.Exec(`INSERT INTO whatsmeow_lid_map (lid, pn) VALUES ('100000000002', '15550000002')`); err != nil {
+		t.Fatalf("insert mapping: %v", err)
+	}
+	second, err := a.OpenSessionResolver()
+	if err != nil {
+		t.Fatalf("OpenSessionResolver again: %v", err)
+	}
+	defer second.Close()
+	learned := types.JID{User: "100000000002", Server: types.HiddenUserServer}
+	if got := second.ResolveLIDToPN(context.Background(), learned); got.User != "15550000002" {
+		t.Fatalf("ResolveLIDToPN = %s, want the mapping added after startup", got)
+	}
+	if uri := lockedSessionURI(sessionPath); strings.Contains(uri, "immutable") || !strings.Contains(uri, "mode=ro") {
+		t.Fatalf("lockedSessionURI = %q, want read-only without the immutable shortcut", uri)
+	}
+}
+
 func TestReadOnlySessionURIEscapesPathDelimiters(t *testing.T) {
 	uri := readOnlySessionURI(filepath.Join(t.TempDir(), "session?prod#1.db"))
 	if strings.Contains(uri, "session?prod#1.db") {

@@ -273,6 +273,24 @@ func (a *App) ReadOnlyResolver() (LocalResolver, error) {
 	return resolver, nil
 }
 
+// SessionResolver is a LocalResolver over session.db that the caller closes.
+type SessionResolver interface {
+	LocalResolver
+	Close() error
+}
+
+// OpenSessionResolver opens a fresh read-only view of the session identities
+// for a process that also writes session.db, such as sync --follow. Unlike
+// ReadOnlyResolver it is not cached, so it sees mappings learned since startup,
+// and it reads under SQLite locks instead of treating the file as immutable.
+func (a *App) OpenSessionResolver() (SessionResolver, error) {
+	resolver, err := openSessionResolver(filepath.Join(a.opts.StoreDir, "session.db"), lockedSessionURI)
+	if err != nil {
+		return nil, err
+	}
+	return resolver, nil
+}
+
 func (a *App) DB() *store.DB { return a.db }
 func (a *App) Events() *out.EventWriter {
 	return a.opts.Events

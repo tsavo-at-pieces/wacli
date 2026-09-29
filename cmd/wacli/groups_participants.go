@@ -91,7 +91,13 @@ func newGroupsParticipantsActionCmd(flags *rootFlags, action string) *cobra.Comm
 
 			a, lk, err := newApp(ctx, flags, true, false)
 			if err != nil {
-				return err
+				return delegateAfterOpenFailure(ctx, flags, err, sendDelegateRequest{
+					Kind:  groupParticipantsKindPrefix + action,
+					To:    group,
+					Users: users,
+				}, func(resp sendDelegateResponse) error {
+					return writeGroupParticipantsChanged(flags, resp.Participants)
+				})
 			}
 			defer closeApp(a, lk)
 
@@ -101,36 +107,47 @@ func newGroupsParticipantsActionCmd(flags *rootFlags, action string) *cobra.Comm
 			if err := a.Connect(ctx, false, nil); err != nil {
 				return err
 			}
-
-			gjid, err := types.ParseJID(group)
+			updated, err := changeGroupParticipants(ctx, a, group, users, action)
 			if err != nil {
 				return err
 			}
-			var jids []types.JID
-			for _, u := range users {
-				j, err := wa.ParseUserOrJID(u)
-				if err != nil {
-					return err
-				}
-				jids = append(jids, j)
-			}
-
-			updated, err := a.WA().UpdateGroupParticipants(ctx, gjid, jids, wa.GroupParticipantAction(action))
-			if err != nil {
-				return err
-			}
-			if info, err := a.WA().GetGroupInfo(ctx, gjid); err == nil && info != nil {
-				_ = persistGroupInfo(ctx, a.DB(), a.WA(), info)
-			}
-
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, updated)
-			}
-			fmt.Fprintln(os.Stdout, "OK")
-			return nil
+			return writeGroupParticipantsChanged(flags, updated)
 		},
 	}
 	cmd.Flags().StringVar(&group, "jid", "", "group JID (…@g.us)")
 	cmd.Flags().StringSliceVar(&users, "user", nil, "user phone number (+E164 and formatting ok) or JID (repeatable)")
 	return cmd
+}
+
+// changeGroupParticipants applies one participant action and stores the
+// group's live info. It returns WhatsApp's per-participant results.
+func changeGroupParticipants(ctx context.Context, a waStoreApp, rawJID string, users []string, action string) ([]types.GroupParticipant, error) {
+	gjid, err := types.ParseJID(rawJID)
+	if err != nil {
+		return nil, err
+	}
+	var jids []types.JID
+	for _, u := range users {
+		j, err := wa.ParseUserOrJID(u)
+		if err != nil {
+			return nil, err
+		}
+		jids = append(jids, j)
+	}
+	updated, err := a.WA().UpdateGroupParticipants(ctx, gjid, jids, wa.GroupParticipantAction(action))
+	if err != nil {
+		return nil, err
+	}
+	refreshGroupInfo(ctx, a, gjid)
+	return updated, nil
+}
+
+// writeGroupParticipantsChanged prints participant results: the whatsmeow
+// slice when run directly, or its JSON encoding from a sync process.
+func writeGroupParticipantsChanged(flags *rootFlags, updated any) error {
+	if flags.asJSON {
+		return out.WriteJSON(os.Stdout, updated)
+	}
+	fmt.Fprintln(os.Stdout, "OK")
+	return nil
 }

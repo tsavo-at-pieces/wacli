@@ -24,7 +24,9 @@ func newGroupsRefreshCmd(flags *rootFlags) *cobra.Command {
 
 			a, lk, err := newApp(ctx, flags, true, false)
 			if err != nil {
-				return err
+				return delegateAfterOpenFailure(ctx, flags, err, sendDelegateRequest{Kind: groupsRefreshKind}, func(resp sendDelegateResponse) error {
+					return writeGroupsRefreshed(flags, resp.Count)
+				})
 			}
 			defer closeApp(a, lk)
 
@@ -34,33 +36,45 @@ func newGroupsRefreshCmd(flags *rootFlags) *cobra.Command {
 			if err := a.Connect(ctx, false, nil); err != nil {
 				return err
 			}
-
-			gs, err := a.WA().GetJoinedGroups(ctx)
+			n, err := refreshJoinedGroups(ctx, a)
 			if err != nil {
 				return err
 			}
-			joined := map[string]bool{}
-			now := time.Now().UTC()
-			for _, g := range gs {
-				if g == nil {
-					continue
-				}
-				joined[g.JID.String()] = true
-				_ = persistGroupInfo(ctx, a.DB(), a.WA(), g)
-				_ = a.DB().UpsertChatMetadata(g.JID.String(), "group", g.GroupName.Name)
-			}
-			if err := a.DB().MarkGroupsMissingFrom(joined, now); err != nil {
-				return err
-			}
-
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"groups": len(gs)})
-			}
-			fmt.Fprintf(os.Stdout, "Imported %d groups.\n", len(gs))
-			return nil
+			return writeGroupsRefreshed(flags, n)
 		},
 	}
 	return cmd
+}
+
+// refreshJoinedGroups stores every joined group's live info and marks groups
+// missing from the list as left. It returns how many groups were fetched.
+func refreshJoinedGroups(ctx context.Context, a waStoreApp) (int, error) {
+	gs, err := a.WA().GetJoinedGroups(ctx)
+	if err != nil {
+		return 0, err
+	}
+	joined := map[string]bool{}
+	now := time.Now().UTC()
+	for _, g := range gs {
+		if g == nil {
+			continue
+		}
+		joined[g.JID.String()] = true
+		_ = persistGroupInfo(ctx, a.DB(), a.WA(), g)
+		_ = a.DB().UpsertChatMetadata(g.JID.String(), "group", g.GroupName.Name)
+	}
+	if err := a.DB().MarkGroupsMissingFrom(joined, now); err != nil {
+		return 0, err
+	}
+	return len(gs), nil
+}
+
+func writeGroupsRefreshed(flags *rootFlags, n int) error {
+	if flags.asJSON {
+		return out.WriteJSON(os.Stdout, map[string]any{"groups": n})
+	}
+	fmt.Fprintf(os.Stdout, "Imported %d groups.\n", n)
+	return nil
 }
 
 func newGroupsListCmd(flags *rootFlags) *cobra.Command {

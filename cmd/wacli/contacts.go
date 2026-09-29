@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/openclaw/wacli/internal/out"
+	"github.com/openclaw/wacli/internal/store"
 	"github.com/spf13/cobra"
 )
 
@@ -137,42 +138,56 @@ func newContactsRefreshCmd(flags *rootFlags) *cobra.Command {
 
 			a, lk, err := newApp(ctx, flags, true, true)
 			if err != nil {
-				return err
+				return delegateAfterOpenFailure(ctx, flags, err, sendDelegateRequest{Kind: contactsRefreshKind}, func(resp sendDelegateResponse) error {
+					return writeContactsRefreshed(flags, resp.Count)
+				})
 			}
 			defer closeApp(a, lk)
 
 			if err := a.OpenWA(); err != nil {
 				return err
 			}
-			cs, err := a.WA().GetAllContacts(ctx)
+			count, err := importSessionContacts(ctx, a)
 			if err != nil {
 				return err
 			}
-
-			var count int
-			for jid, info := range cs {
-				jid = canonicalCLIJID(jid)
-				if err := a.DB().UpsertContact(
-					jid.String(),
-					jid.User,
-					info.PushName,
-					info.FullName,
-					info.FirstName,
-					info.BusinessName,
-				); err != nil {
-					return fmt.Errorf("upsert contact %s: %w", jid.String(), err)
-				}
-				count++
-			}
-
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"contacts": count})
-			}
-			fmt.Fprintf(os.Stdout, "Imported %d contacts.\n", count)
-			return nil
+			return writeContactsRefreshed(flags, count)
 		},
 	}
 	return cmd
+}
+
+// importSessionContacts copies the session store's contacts into wacli.db and
+// returns how many were imported.
+func importSessionContacts(ctx context.Context, a waStoreApp) (int, error) {
+	cs, err := a.WA().GetAllContacts(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var count int
+	for jid, info := range cs {
+		jid = canonicalCLIJID(jid)
+		if err := a.DB().UpsertContact(
+			jid.String(),
+			jid.User,
+			info.PushName,
+			info.FullName,
+			info.FirstName,
+			info.BusinessName,
+		); err != nil {
+			return 0, fmt.Errorf("upsert contact %s: %w", jid.String(), err)
+		}
+		count++
+	}
+	return count, nil
+}
+
+func writeContactsRefreshed(flags *rootFlags, count int) error {
+	if flags.asJSON {
+		return out.WriteJSON(os.Stdout, map[string]any{"contacts": count})
+	}
+	fmt.Fprintf(os.Stdout, "Imported %d contacts.\n", count)
+	return nil
 }
 
 func newContactsAliasCmd(flags *rootFlags) *cobra.Command {
@@ -189,28 +204,8 @@ func newContactsAliasCmd(flags *rootFlags) *cobra.Command {
 			if strings.TrimSpace(jid) == "" || strings.TrimSpace(alias) == "" {
 				return fmt.Errorf("--jid and --alias are required")
 			}
-			if err := flags.requireWritable(); err != nil {
-				return err
-			}
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-			jids, err := contactMetadataJIDs(ctx, a, jid)
-			if err != nil {
-				return err
-			}
-			if err := a.DB().SetAlias(jids, alias); err != nil {
-				return err
-			}
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"jid": jid, "alias": alias})
-			}
-			fmt.Fprintln(os.Stdout, "OK")
-			return nil
+			return runContactMetadata(flags, sendDelegateRequest{Kind: contactAliasSetKind, To: jid, Alias: alias},
+				map[string]any{"jid": jid, "alias": alias})
 		},
 	})
 	cmd.AddCommand(&cobra.Command{
@@ -221,28 +216,8 @@ func newContactsAliasCmd(flags *rootFlags) *cobra.Command {
 			if strings.TrimSpace(jid) == "" {
 				return fmt.Errorf("--jid is required")
 			}
-			if err := flags.requireWritable(); err != nil {
-				return err
-			}
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-			jids, err := contactMetadataJIDs(ctx, a, jid)
-			if err != nil {
-				return err
-			}
-			if err := a.DB().RemoveAlias(jids); err != nil {
-				return err
-			}
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"jid": jid, "removed": true})
-			}
-			fmt.Fprintln(os.Stdout, "OK")
-			return nil
+			return runContactMetadata(flags, sendDelegateRequest{Kind: contactAliasRmKind, To: jid},
+				map[string]any{"jid": jid, "removed": true})
 		},
 	})
 
@@ -265,28 +240,8 @@ func newContactsTagsCmd(flags *rootFlags) *cobra.Command {
 			if strings.TrimSpace(jid) == "" || strings.TrimSpace(tag) == "" {
 				return fmt.Errorf("--jid and --tag are required")
 			}
-			if err := flags.requireWritable(); err != nil {
-				return err
-			}
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-			jids, err := contactMetadataJIDs(ctx, a, jid)
-			if err != nil {
-				return err
-			}
-			if err := a.DB().AddTag(jids, tag); err != nil {
-				return err
-			}
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"jid": jid, "tag": tag})
-			}
-			fmt.Fprintln(os.Stdout, "OK")
-			return nil
+			return runContactMetadata(flags, sendDelegateRequest{Kind: contactTagsAddKind, To: jid, Tag: tag},
+				map[string]any{"jid": jid, "tag": tag})
 		},
 	})
 	cmd.AddCommand(&cobra.Command{
@@ -298,32 +253,60 @@ func newContactsTagsCmd(flags *rootFlags) *cobra.Command {
 			if strings.TrimSpace(jid) == "" || strings.TrimSpace(tag) == "" {
 				return fmt.Errorf("--jid and --tag are required")
 			}
-			if err := flags.requireWritable(); err != nil {
-				return err
-			}
-			ctx, cancel := withTimeout(context.Background(), flags)
-			defer cancel()
-			a, lk, err := newApp(ctx, flags, true, false)
-			if err != nil {
-				return err
-			}
-			defer closeApp(a, lk)
-			jids, err := contactMetadataJIDs(ctx, a, jid)
-			if err != nil {
-				return err
-			}
-			if err := a.DB().RemoveTag(jids, tag); err != nil {
-				return err
-			}
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"jid": jid, "tag": tag, "removed": true})
-			}
-			fmt.Fprintln(os.Stdout, "OK")
-			return nil
+			return runContactMetadata(flags, sendDelegateRequest{Kind: contactTagsRmKind, To: jid, Tag: tag},
+				map[string]any{"jid": jid, "tag": tag, "removed": true})
 		},
 	})
 
 	cmd.PersistentFlags().String("jid", "", "contact JID")
 	cmd.PersistentFlags().String("tag", "", "tag")
 	return cmd
+}
+
+// runContactMetadata applies one local alias or tag change, or has a
+// same-store `sync --follow` that holds the lock apply it, then prints result.
+func runContactMetadata(flags *rootFlags, change sendDelegateRequest, result map[string]any) error {
+	if err := flags.requireWritable(); err != nil {
+		return err
+	}
+	ctx, cancel := withTimeout(context.Background(), flags)
+	defer cancel()
+	write := func(sendDelegateResponse) error {
+		if flags.asJSON {
+			return out.WriteJSON(os.Stdout, result)
+		}
+		fmt.Fprintln(os.Stdout, "OK")
+		return nil
+	}
+
+	a, lk, err := newApp(ctx, flags, true, false)
+	if err != nil {
+		return delegateAfterOpenFailure(ctx, flags, err, change, write)
+	}
+	defer closeApp(a, lk)
+	jids, err := contactMetadataJIDs(ctx, a, change.To)
+	if err != nil {
+		return err
+	}
+	if err := applyContactMetadata(a.DB(), change, jids); err != nil {
+		return err
+	}
+	return write(sendDelegateResponse{})
+}
+
+// applyContactMetadata writes one alias or tag change to every identity of
+// the contact at once.
+func applyContactMetadata(db *store.DB, change sendDelegateRequest, jids []string) error {
+	switch change.Kind {
+	case contactAliasSetKind:
+		return db.SetAlias(jids, change.Alias)
+	case contactAliasRmKind:
+		return db.RemoveAlias(jids)
+	case contactTagsAddKind:
+		return db.AddTag(jids, change.Tag)
+	case contactTagsRmKind:
+		return db.RemoveTag(jids, change.Tag)
+	default:
+		return fmt.Errorf("unsupported send kind %q", change.Kind)
+	}
 }

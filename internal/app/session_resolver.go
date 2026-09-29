@@ -19,6 +19,10 @@ type readOnlySessionResolver struct {
 }
 
 func openReadOnlySessionResolver(path string) (*readOnlySessionResolver, error) {
+	return openSessionResolver(path, readOnlySessionURI)
+}
+
+func openSessionResolver(path string, uri func(string) string) (*readOnlySessionResolver, error) {
 	if strings.TrimSpace(path) == "" {
 		return nil, fmt.Errorf("session db path is required")
 	}
@@ -28,7 +32,7 @@ func openReadOnlySessionResolver(path string) (*readOnlySessionResolver, error) 
 	if _, err := os.Stat(path); err != nil {
 		return nil, err
 	}
-	db, err := sql.Open("sqlite3", readOnlySessionURI(path))
+	db, err := sql.Open("sqlite3", uri(path))
 	if err != nil {
 		return nil, fmt.Errorf("open session sqlite: %w", err)
 	}
@@ -46,6 +50,12 @@ func readOnlySessionURI(path string) string {
 		params += "&immutable=1"
 	}
 	return sqliteutil.FileURI(path, params)
+}
+
+// lockedSessionURI opens session.db read-only without the immutable shortcut,
+// for a reader that shares the file with a live writer in the same process.
+func lockedSessionURI(path string) string {
+	return sqliteutil.FileURI(path, "_foreign_keys=on&_busy_timeout=5000&mode=ro&_query_only=1")
 }
 
 func sessionSQLiteSidecarsExist(path string) bool {

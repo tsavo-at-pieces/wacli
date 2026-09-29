@@ -97,7 +97,9 @@ func newGroupsRenameCmd(flags *rootFlags) *cobra.Command {
 
 			a, lk, err := newApp(ctx, flags, true, false)
 			if err != nil {
-				return err
+				return delegateAfterOpenFailure(ctx, flags, err, sendDelegateRequest{Kind: groupRenameKind, To: jidStr, Name: name}, func(resp sendDelegateResponse) error {
+					return writeGroupRenamed(flags, resp.Chat, name)
+				})
 			}
 			defer closeApp(a, lk)
 
@@ -107,27 +109,36 @@ func newGroupsRenameCmd(flags *rootFlags) *cobra.Command {
 			if err := a.Connect(ctx, false, nil); err != nil {
 				return err
 			}
-
-			gjid, err := types.ParseJID(jidStr)
+			gjid, err := renameGroup(ctx, a, jidStr, name)
 			if err != nil {
 				return err
 			}
-			if err := a.WA().SetGroupName(ctx, gjid, name); err != nil {
-				return err
-			}
-			if info, err := a.WA().GetGroupInfo(ctx, gjid); err == nil && info != nil {
-				_ = persistGroupInfo(ctx, a.DB(), a.WA(), info)
-			}
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"jid": gjid.String(), "name": name})
-			}
-			fmt.Fprintln(os.Stdout, "OK")
-			return nil
+			return writeGroupRenamed(flags, gjid.String(), name)
 		},
 	}
 	cmd.Flags().StringVar(&jidStr, "jid", "", "group JID (…@g.us)")
 	cmd.Flags().StringVar(&name, "name", "", "new name")
 	return cmd
+}
+
+func renameGroup(ctx context.Context, a waStoreApp, rawJID, name string) (types.JID, error) {
+	gjid, err := types.ParseJID(rawJID)
+	if err != nil {
+		return types.JID{}, err
+	}
+	if err := a.WA().SetGroupName(ctx, gjid, name); err != nil {
+		return types.JID{}, err
+	}
+	refreshGroupInfo(ctx, a, gjid)
+	return gjid, nil
+}
+
+func writeGroupRenamed(flags *rootFlags, jid, name string) error {
+	if flags.asJSON {
+		return out.WriteJSON(os.Stdout, map[string]any{"jid": jid, "name": name})
+	}
+	fmt.Fprintln(os.Stdout, "OK")
+	return nil
 }
 
 func newGroupsLeaveCmd(flags *rootFlags) *cobra.Command {
@@ -147,7 +158,9 @@ func newGroupsLeaveCmd(flags *rootFlags) *cobra.Command {
 
 			a, lk, err := newApp(ctx, flags, true, false)
 			if err != nil {
-				return err
+				return delegateAfterOpenFailure(ctx, flags, err, sendDelegateRequest{Kind: groupLeaveKind, To: jidStr}, func(resp sendDelegateResponse) error {
+					return writeGroupLeft(flags, resp.Chat)
+				})
 			}
 			defer closeApp(a, lk)
 
@@ -157,21 +170,34 @@ func newGroupsLeaveCmd(flags *rootFlags) *cobra.Command {
 			if err := a.Connect(ctx, false, nil); err != nil {
 				return err
 			}
-			gjid, err := types.ParseJID(jidStr)
+			gjid, err := leaveGroup(ctx, a, jidStr)
 			if err != nil {
 				return err
 			}
-			if err := a.WA().LeaveGroup(ctx, gjid); err != nil {
-				return err
-			}
-			_ = a.DB().MarkGroupLeft(gjid.String(), time.Now().UTC())
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"jid": gjid.String(), "left": true})
-			}
-			fmt.Fprintln(os.Stdout, "OK")
-			return nil
+			return writeGroupLeft(flags, gjid.String())
 		},
 	}
 	cmd.Flags().StringVar(&jidStr, "jid", "", "group JID (…@g.us)")
 	return cmd
+}
+
+// leaveGroup leaves on WhatsApp, then marks the group left locally.
+func leaveGroup(ctx context.Context, a waStoreApp, rawJID string) (types.JID, error) {
+	gjid, err := types.ParseJID(rawJID)
+	if err != nil {
+		return types.JID{}, err
+	}
+	if err := a.WA().LeaveGroup(ctx, gjid); err != nil {
+		return types.JID{}, err
+	}
+	_ = a.DB().MarkGroupLeft(gjid.String(), time.Now().UTC())
+	return gjid, nil
+}
+
+func writeGroupLeft(flags *rootFlags, jid string) error {
+	if flags.asJSON {
+		return out.WriteJSON(os.Stdout, map[string]any{"jid": jid, "left": true})
+	}
+	fmt.Fprintln(os.Stdout, "OK")
+	return nil
 }

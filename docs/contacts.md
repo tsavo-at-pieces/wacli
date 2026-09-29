@@ -36,6 +36,7 @@ wacli contacts tags rm --jid JID --tag TAG
 - Use `import-system --dry-run` before writing. Use `import-system --clear` to remove imported system names.
 - See [contacts import-system](contacts-import-system.md) for the full import workflow, JSON shape, file format, and verification steps.
 - Tags are local grouping metadata for scripts and future workflows.
+- While a same-store `sync --follow` owns the store lock, `alias set|rm`, `tags add|rm`, and `refresh` are delegated to it. It writes with its own open store and resolves identities from the same session mapping, still without contacting WhatsApp, and the command prints the same output as a direct run. `import-system` still needs the lock. Restart an older sync process after upgrading; it rejects a command it predates without running it.
 
 ## Examples
 

@@ -54,6 +54,7 @@ wacli groups prune [--days N] [--left-only=false|--include-active] [--dry-run] [
 - Use `prune --dry-run` before deleting and `--confirm` only after reviewing the target list.
 - Participant users accept phone numbers with common formatting or JIDs.
 - Invite `revoke` resets the invite link.
+- While a same-store `sync --follow` owns the store lock, `create`, `rename`, `leave`, `join`, `refresh`, `invite link revoke`, and `participants add|remove|promote|demote` are delegated to it and print the same output as a direct run. `info`, `topic`, `description`, `announce-only`, `locked`, `requests`, and `invite link get` still need the lock. Restart an older sync process after upgrading; it rejects a command it predates without running it.
 
 ## Examples
 

@@ -74,7 +74,7 @@ wacli --read-only --json messages search "invoice"
 WACLI_READONLY=1 wacli --json doctor
 ```
 
-Write commands take a per-store lock. After a `sync --follow` process finishes startup, supported send commands plus `chats mark-read` and `chats mark-unread` are delegated to it while it owns that lock. See [companion integrations](docs/integrations.md) for webhooks and safe read-only SQLite access.
+Write commands take a per-store lock. After a `sync --follow` process finishes startup, supported send, chat-state, group, contact-metadata, and message-management commands are delegated to it while it owns that lock (see [sync](docs/sync.md)). See [companion integrations](docs/integrations.md) for webhooks and safe read-only SQLite access.
 
 ## Commands
 

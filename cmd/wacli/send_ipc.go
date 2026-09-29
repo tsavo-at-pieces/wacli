@@ -66,6 +66,18 @@ type sendDelegateRequest struct {
 	PresenceMedia        string   `json:"presence_media,omitempty"`
 	Read                 *bool    `json:"read,omitempty"`
 	Receipts             bool     `json:"receipts,omitempty"`
+	MuteDurationNS       int64    `json:"mute_duration_ns,omitempty"`
+	Chat                 string   `json:"chat,omitempty"`
+	Users                []string `json:"users,omitempty"`
+	InviteCode           string   `json:"invite_code,omitempty"`
+	AnnounceOnly         bool     `json:"announce_only,omitempty"`
+	Locked               bool     `json:"locked,omitempty"`
+	JoinApproval         bool     `json:"join_approval,omitempty"`
+	Community            bool     `json:"community,omitempty"`
+	LinkedParent         string   `json:"linked_parent,omitempty"`
+	Alias                string   `json:"alias,omitempty"`
+	Tag                  string   `json:"tag,omitempty"`
+	DeleteMedia          bool     `json:"delete_media,omitempty"`
 	PostSendWaitMS       int64    `json:"post_send_wait_ms,omitempty"`
 	TimeoutMS            int64    `json:"timeout_ms,omitempty"`
 	DeadlineUnixMS       int64    `json:"deadline_unix_ms,omitempty"`
@@ -89,6 +101,14 @@ type sendDelegateResponse struct {
 	Action         string            `json:"action,omitempty"`
 	Receipts       *int              `json:"receipts,omitempty"`
 	ReceiptType    string            `json:"receipt_type,omitempty"`
+	// Participants and Group carry whatsmeow results exactly as the direct
+	// command prints them with --json.
+	Participants json.RawMessage `json:"participants,omitempty"`
+	Group        json.RawMessage `json:"group,omitempty"`
+	Name         string          `json:"name,omitempty"`
+	Link         string          `json:"link,omitempty"`
+	Count        int             `json:"count,omitempty"`
+	DeletedMedia bool            `json:"deleted_media,omitempty"`
 }
 
 type sendDelegateExecutor func(context.Context, sendDelegateRequest) (sendDelegateResponse, error)
@@ -320,7 +340,7 @@ func executeDelegatedSend(parent context.Context, a *app.App, req sendDelegateRe
 		req.Receipts = true
 		return executeDelegatedMarkRead(ctx, a, req)
 	default:
-		return sendDelegateResponse{}, fmt.Errorf("unsupported send kind %q", req.Kind)
+		return executeDelegatedManagement(ctx, a, req)
 	}
 }
 

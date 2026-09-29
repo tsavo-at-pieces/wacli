@@ -90,7 +90,9 @@ func newGroupsInviteLinkRevokeCmd(flags *rootFlags) *cobra.Command {
 
 			a, lk, err := newApp(ctx, flags, true, false)
 			if err != nil {
-				return err
+				return delegateAfterOpenFailure(ctx, flags, err, sendDelegateRequest{Kind: groupInviteRevokeKind, To: jidStr}, func(resp sendDelegateResponse) error {
+					return writeGroupInviteRevoked(flags, resp.Chat, resp.Link)
+				})
 			}
 			defer closeApp(a, lk)
 
@@ -100,23 +102,36 @@ func newGroupsInviteLinkRevokeCmd(flags *rootFlags) *cobra.Command {
 			if err := a.Connect(ctx, false, nil); err != nil {
 				return err
 			}
-			gjid, err := types.ParseJID(jidStr)
+			gjid, link, err := revokeGroupInviteLink(ctx, a, jidStr)
 			if err != nil {
 				return err
 			}
-			link, err := a.WA().GetGroupInviteLink(ctx, gjid, true)
-			if err != nil {
-				return err
-			}
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"jid": gjid.String(), "link": link, "revoked": true})
-			}
-			fmt.Fprintln(os.Stdout, link)
-			return nil
+			return writeGroupInviteRevoked(flags, gjid.String(), link)
 		},
 	}
 	cmd.Flags().StringVar(&jidStr, "jid", "", "group JID (…@g.us)")
 	return cmd
+}
+
+// revokeGroupInviteLink resets the invite link and returns the new one.
+func revokeGroupInviteLink(ctx context.Context, a waStoreApp, rawJID string) (types.JID, string, error) {
+	gjid, err := types.ParseJID(rawJID)
+	if err != nil {
+		return types.JID{}, "", err
+	}
+	link, err := a.WA().GetGroupInviteLink(ctx, gjid, true)
+	if err != nil {
+		return types.JID{}, "", err
+	}
+	return gjid, link, nil
+}
+
+func writeGroupInviteRevoked(flags *rootFlags, jid, link string) error {
+	if flags.asJSON {
+		return out.WriteJSON(os.Stdout, map[string]any{"jid": jid, "link": link, "revoked": true})
+	}
+	fmt.Fprintln(os.Stdout, link)
+	return nil
 }
 
 func newGroupsJoinCmd(flags *rootFlags) *cobra.Command {
@@ -136,7 +151,9 @@ func newGroupsJoinCmd(flags *rootFlags) *cobra.Command {
 
 			a, lk, err := newApp(ctx, flags, true, false)
 			if err != nil {
-				return err
+				return delegateAfterOpenFailure(ctx, flags, err, sendDelegateRequest{Kind: groupJoinKind, InviteCode: code}, func(resp sendDelegateResponse) error {
+					return writeGroupJoined(flags, resp.Chat)
+				})
 			}
 			defer closeApp(a, lk)
 
@@ -146,20 +163,31 @@ func newGroupsJoinCmd(flags *rootFlags) *cobra.Command {
 			if err := a.Connect(ctx, false, nil); err != nil {
 				return err
 			}
-			jid, err := a.WA().JoinGroupWithLink(ctx, code)
+			jid, err := joinGroup(ctx, a, code)
 			if err != nil {
 				return err
 			}
-			if info, err := a.WA().GetGroupInfo(ctx, jid); err == nil && info != nil {
-				_ = persistGroupInfo(ctx, a.DB(), a.WA(), info)
-			}
-			if flags.asJSON {
-				return out.WriteJSON(os.Stdout, map[string]any{"jid": jid.String(), "joined": true})
-			}
-			fmt.Fprintf(os.Stdout, "Joined: %s\n", jid.String())
-			return nil
+			return writeGroupJoined(flags, jid.String())
 		},
 	}
 	cmd.Flags().StringVar(&code, "code", "", "invite code (from link)")
 	return cmd
+}
+
+// joinGroup joins with an invite code and stores the group's live info.
+func joinGroup(ctx context.Context, a waStoreApp, code string) (types.JID, error) {
+	jid, err := a.WA().JoinGroupWithLink(ctx, code)
+	if err != nil {
+		return types.JID{}, err
+	}
+	refreshGroupInfo(ctx, a, jid)
+	return jid, nil
+}
+
+func writeGroupJoined(flags *rootFlags, jid string) error {
+	if flags.asJSON {
+		return out.WriteJSON(os.Stdout, map[string]any{"jid": jid, "joined": true})
+	}
+	fmt.Fprintf(os.Stdout, "Joined: %s\n", jid)
+	return nil
 }
