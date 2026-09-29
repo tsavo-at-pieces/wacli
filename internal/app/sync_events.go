@@ -111,6 +111,11 @@ func (a *App) addSyncEventHandler(ctx context.Context, opts SyncOptions, message
 			*events.UserStatusMute:
 			lastEvent.Store(nowUTC().UnixNano())
 			a.handleAppStatePersistenceEvent(ctx, v, nil)
+		case *events.Contact:
+			lastEvent.Store(nowUTC().UnixNano())
+			a.handleContactEvent(ctx, v)
+		case *events.Blocklist:
+			a.handleBlocklistEvent(ctx, v)
 		case *events.HistorySync:
 			lastEvent.Store(nowUTC().UnixNano())
 			a.handleHistorySync(ctx, opts, v, messagesStored, lastEvent, enqueueMedia, limits)
