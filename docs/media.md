@@ -9,7 +9,8 @@ Read when: downloading media from a synced message, or transcribing voice notes.
 ```bash
 wacli media download --chat JID --id MSG_ID [--output PATH]
 wacli media backfill [--chat JID] [--limit N] [--workers N]
-wacli media retry [--chat JID] [--before YYYY-MM-DD] [--limit N] [--batch N] [--wait DUR]
+wacli media retry [--chat JID] [--type TYPES] [--before YYYY-MM-DD] [--limit N] [--batch N] [--wait DUR]
+wacli media retry --chat JID --id MSG_ID [--batch N] [--wait DUR]
 wacli media transcribe --chat JID --id MSG_ID [--force] [--engine NAME]
 wacli media transcribe --pending [--chat JID] [--after DATE] [--before DATE] [--limit N] [--engine NAME]
 ```
@@ -25,7 +26,9 @@ Downloads media for a single message.
 - `--output` may be a file path or directory.
 - If `--output` is omitted, media is written under the store media directory.
 - `--read-only` is supported only with explicit `--output`; it writes the file without opening the WhatsApp session store or recording `local_path` / `downloaded_at`.
-- Because it never opens the store for writing, `--read-only` also takes **no store lock**, so it is the way to fetch media while `sync --follow` is running. A follow session holds the lock for its entire run, so a plain `media download` cannot proceed until it stops, and `--lock-wait` only turns the immediate failure into a timeout.
+- Because it never opens the store for writing, `--read-only` also takes **no store lock**.
+- While a same-store `sync --follow` is running (it holds the store lock for its whole run), a plain `media download` is handed to it: the sync process downloads with its own connection into the store media directory, or into `--output` (resolved against your current directory), records `local_path` and `downloaded_at` exactly as a direct run does, and the command prints the same output. There is no need to stop sync. See [While sync runs](#while-sync-runs).
+- If the lock is held by something that does not accept delegated commands (a `sync --once`, another write command, or a follow process still starting up), the command fails and names `--read-only --output PATH` as the way to fetch the file without the lock. `--lock-wait` only turns the immediate failure into a timeout.
 
 ### Examples
 
@@ -54,6 +57,7 @@ the sync session. Media for messages synced earlier is never fetched by sync;
 - Runs until completion or interruption by default; explicitly set global `--timeout` to cap a run.
 - Requires a writable store; not available in `--read-only` mode.
 - Reports counts: pending (total matching), attempted, downloaded, skipped, failed.
+- Runs inside a same-store `sync --follow` when one is running; see [While sync runs](#while-sync-runs).
 
 ### Examples
 
@@ -83,11 +87,23 @@ also confirmed expired, so later runs can skip genuinely unavailable rows.
 - Retry receipts are sent in batches (`--batch`, default 32) with a second
   attempt for non-responders; `--wait` (default 30s) bounds each attempt.
 - `--chat` scopes to one chat; `--before YYYY-MM-DD` scopes to media older than a date.
-- `--limit` caps how many messages to retry (0 = all pending); newest first.
+- `--type` scopes to media types, comma-separated: `image`, `video`, `gif`,
+  `audio`, `document`, `sticker`. `video` includes GIFs (WhatsApp sends them as
+  looping video); `gif` selects only them.
+- `--limit` caps how many messages to retry (0 = all pending); newest first,
+  across all types unless `--type` is given.
+- `--chat JID --id MSG_ID` retries exactly one message. It is not limited to
+  the pending set: it also retries media already marked unavailable or recorded
+  as downloaded (for example after its file was deleted). A message that does
+  not exist in that chat, was deleted, or has no download metadata is an error.
+  `--id` cannot be combined with `--type`, `--before` or `--limit`.
+- Without `--id` and `--type`, the selection is unchanged: the newest pending
+  media of any type.
 - Runs until completion or interruption by default; explicitly set global `--timeout` to cap a run.
 - Reports counts: requested, recovered, not_on_phone (gone), no_response, failed.
 - `no_response` means the phone did not answer in time (often transient) — those
   stay pending and can be retried later; only `not_on_phone` is marked gone.
+- Runs inside a same-store `sync --follow` when one is running; see [While sync runs](#while-sync-runs).
 
 ### Examples
 
@@ -96,7 +112,38 @@ wacli media retry                                    # try to recover all pendin
 wacli media retry --chat 1234567890@s.whatsapp.net   # one chat only
 wacli media retry --before 2026-01-01                # only media older than a date
 wacli media retry --limit 50 --wait 45s --json       # bounded run, machine-readable
+wacli media retry --type audio --limit 20            # the 20 newest voice notes and audio
+wacli media retry --chat 1234567890@s.whatsapp.net --id ABC123   # exactly one message
 ```
+
+## While sync runs
+
+`sync --follow` holds the store lock and the WhatsApp connection for its whole
+run. `media download` (without `--read-only`), `media backfill` and
+`media retry` do not need it stopped: when the store is locked by a same-store
+follow process, the command hands the work to it over the local delegate
+socket, and the follow process runs it with its existing connection and keys.
+
+- The output is the same as a direct run, with or without `--json`. Progress
+  events and warnings (`media_backfill_start`, `media_download_failed`,
+  `media_retry_progress`, ...) are streamed back while the work runs and
+  printed on stderr as NDJSON with `--events`, or as the same stderr lines
+  without it.
+- `--read-only` and flag validation are checked before anything is handed over.
+- These are long jobs, so they do not wait in the queue that serializes sends:
+  sends and other delegated commands keep flowing while a backfill runs. The
+  follow process runs at most 4 jobs at a time, and at most one bulk
+  `media backfill` and one bulk `media retry` (a single-message `--id` retry or
+  a download can run beside them). A job still waiting for its turn when its
+  timeout passes is refused and never runs.
+- A job's budget is the global `--timeout` when you set it explicitly (and
+  always for `media download`, whose default is 5m); otherwise it runs until
+  done, as a direct run would. Interrupting the command (Ctrl-C) or killing it
+  closes the connection, and the follow process stops the job. Work finished
+  before that (downloaded files, recorded paths) is kept.
+- A follow process started before this support rejects the command without
+  running it and reports that the running sync process does not support it;
+  restart `wacli sync` after upgrading.
 
 ## transcribe
 
@@ -127,8 +174,23 @@ machine. Nothing is sent to a cloud service: ffmpeg converts the audio to
   directory that is always removed; `local_path` is not recorded.
 - The only file it writes is `transcripts.db`.
 
+### Expired audio
+
+Older media is gone from the CDN (HTTP 403, 404 or 410). When that happens and
+a same-store `sync --follow` is running, `media transcribe` asks it to run a
+single-message `media retry` for that message (up to two 15 s attempts; about
+90 s in all). The phone re-uploads the audio, the follow process downloads it
+into the store media directory and records `local_path`, and the transcript is
+made from that file (`source: "retry"`). Without a running follow process the
+command reports the expired download with the command to run:
+`wacli media retry --chat JID --id MSG_ID`. In `--read-only` mode it never asks
+the phone (a retry writes the store), and says so. In `--pending` runs each
+expired message is tried the same way; failures are recorded as usual.
+
 Because transcription changes neither WhatsApp nor `wacli.db`, it is allowed
-with `--read-only` / `WACLI_READONLY=1`.
+with `--read-only` / `WACLI_READONLY=1`. The one exception is the recovery of
+expired audio through a running `sync --follow` described above, which only
+happens without `--read-only`.
 
 ### Engines
 
@@ -244,8 +306,9 @@ Single message, `--json`:
  "cached":false,"source":"local","elapsed_ms":520}
 ```
 
-`source` is `local` (downloaded file) or `download` (fetched from the CDN for
-this run). The human form prints just the transcript.
+`source` is `local` (downloaded file), `download` (fetched from the CDN for
+this run) or `retry` (expired on the CDN and recovered from the phone through a
+running `sync --follow`). The human form prints just the transcript.
 
 `--pending --json` returns the counts plus `engine`, `model`, and `results`
 (`chat`, `id`, `status`: `transcribed|empty|skipped|failed`, `detail`). Pending

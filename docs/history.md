@@ -31,6 +31,36 @@ wacli history backfill --chat JID [--count 50] [--requests N] [--wait 1m] [--idl
 - Backfill evaluates progress after the history response has been processed into the local store, including asynchronously delivered responses.
 - Automatic initial history-sync blob downloads are disabled during backfill; only on-demand responses are processed.
 - `--events` emits NDJSON request/response/stop lifecycle events on stderr. Requests include `anchor_msg_id` and `request_chat_jid` (the identity sent to the phone), and a `warning` with code `backfill_anchor_retry` identifies the unanswered anchor and its replacement. Human output reports the same retry on stderr. The result's request count includes retry attempts.
+- Backfill runs until done or interrupted. An explicitly set global `--timeout` caps the whole run (the 5m default does not apply), as for `media backfill`.
+
+## While sync runs
+
+`history backfill` does not need a running `sync --follow` stopped. When a
+same-store follow process holds the store lock, the command hands the backfill
+to it over the local delegate socket:
+
+- The follow process sends the on-demand requests with its existing
+  connection and stores the responses its event handling receives. It does not
+  reconnect, start a second sync loop, or change its history-sync settings.
+  After the last request it keeps listening for `--idle-exit` so a response
+  that arrives in parts is stored in full, as a direct run's idle exit does.
+- Requests, the next-anchor retry (#373), the identity fallback (#444), and
+  their events and warnings are the same code as a direct run. The events are
+  streamed back while the backfill runs and printed on stderr (NDJSON with
+  `--events`, the same lines without it); the result is printed as a direct
+  run prints it, with or without `--json`.
+- `messages_added` counts all messages added to the store during the run, as a
+  direct run does, so live messages the follow process stores meanwhile are
+  included. `messages_synced` counts the messages stored from on-demand
+  responses.
+- One history backfill runs at a time in the follow process (each would
+  otherwise process every on-demand response). A second one waits for its turn
+  within its `--timeout`, or is refused without running when that passes. Sends
+  and other delegated commands are not held up by a running backfill.
+- Interrupting the command (Ctrl-C) closes the connection and the follow
+  process stops the backfill; messages already stored are kept.
+- A follow process started before this support rejects the command without
+  running it; restart `wacli sync` after upgrading.
 
 ## Examples
 
