@@ -104,7 +104,7 @@ type sendDelegateRequest struct {
 	ServerIDs       []int  `json:"server_ids,omitempty"`
 	Count           int    `json:"count,omitempty"`
 	BeforeServerID  int    `json:"before_server_id,omitempty"`
-	Description     string `json:"description,omitempty"`
+	// Description (channel create) is shared with send event above.
 
 	// Profile, privacy and WhatsApp-contact kinds. Profile about text travels
 	// in Message, a known picture ID in ID, a profile name in Name.
