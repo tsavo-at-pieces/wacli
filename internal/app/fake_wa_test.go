@@ -965,3 +965,35 @@ func (f *fakeWA) LinkedLID() string {
 	}
 	return f.linkedLID
 }
+
+func (f *fakeWA) SaveContact(ctx context.Context, req wa.ContactSaveRequest) (wa.ContactSaveResult, error) {
+	return wa.ContactSaveResult{JID: req.JID}, nil
+}
+
+func (f *fakeWA) DeleteContact(ctx context.Context, jid types.JID) (wa.ContactDeleteResult, error) {
+	return wa.ContactDeleteResult{JID: jid, Removed: []types.JID{jid}}, nil
+}
+
+func (f *fakeWA) GetBlocklist(ctx context.Context) (*types.Blocklist, error) {
+	return &types.Blocklist{}, nil
+}
+
+func (f *fakeWA) UpdateBlocklist(ctx context.Context, jid types.JID, action events.BlocklistChangeAction) (*types.Blocklist, error) {
+	return &types.Blocklist{JIDs: []types.JID{jid}}, nil
+}
+
+func (f *fakeWA) GetPrivacySettings(ctx context.Context) (types.PrivacySettings, error) {
+	return types.PrivacySettings{}, nil
+}
+
+func (f *fakeWA) SetPrivacySetting(ctx context.Context, name types.PrivacySettingType, value types.PrivacySetting) (types.PrivacySettings, error) {
+	return types.PrivacySettings{}, nil
+}
+
+func (f *fakeWA) SetDefaultDisappearingTimer(ctx context.Context, timer time.Duration) error {
+	return nil
+}
+
+func (f *fakeWA) GetStatusPrivacy(ctx context.Context) ([]types.StatusPrivacy, error) {
+	return nil, nil
+}

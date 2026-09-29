@@ -121,6 +121,15 @@ type WAClient interface {
 	NewsletterMarkViewed(ctx context.Context, jid types.JID, serverIDs []types.MessageServerID) error
 	CreateNewsletter(ctx context.Context, name, description string) (*types.NewsletterMetadata, error)
 	RejectCall(ctx context.Context, from types.JID, callID string) error
+
+	// Contacts, block list and privacy.
+	SaveContact(ctx context.Context, req wa.ContactSaveRequest) (wa.ContactSaveResult, error)
+	DeleteContact(ctx context.Context, jid types.JID) (wa.ContactDeleteResult, error)
+	GetBlocklist(ctx context.Context) (*types.Blocklist, error)
+	UpdateBlocklist(ctx context.Context, jid types.JID, action events.BlocklistChangeAction) (*types.Blocklist, error)
+	GetPrivacySettings(ctx context.Context) (types.PrivacySettings, error)
+	SetPrivacySetting(ctx context.Context, name types.PrivacySettingType, value types.PrivacySetting) (types.PrivacySettings, error)
+	SetDefaultDisappearingTimer(ctx context.Context, timer time.Duration) error
 }
 
 type Options struct {
